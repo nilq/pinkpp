@@ -1,0 +1,11 @@
+[package]
+name = "rust--"
+version = "0.1.0"
+authors = ["Nicholas Mazzuca <npmazzuca@gmail.com>"]
+
+[[bin]]
+name = "rust--"
+path = "src/driver.rs"
+
+[dependencies]
+llvm-sys = "0.2.1"
