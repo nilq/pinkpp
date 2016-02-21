@@ -1,10 +1,10 @@
 [package]
-name = "rust--"
+name = "pink"
 version = "0.1.0"
 authors = ["Nicholas Mazzuca <npmazzuca@gmail.com>"]
 
 [[bin]]
-name = "rust--"
+name = "pink"
 path = "src/driver.rs"
 
 [dependencies]

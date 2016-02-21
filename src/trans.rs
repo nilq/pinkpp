@@ -35,6 +35,7 @@ pub enum expr {
     Not(Box<expr>), // !expr
     Variable(String),
     IntLiteral(u64),
+    BoolLiteral(bool),
 }
 
 impl expr {
@@ -43,7 +44,10 @@ impl expr {
         unsafe {
             match self {
                 expr::IntLiteral(i) => {
-                    value::int_literal(ty.clone(), i)
+                    value::int_literal(ty, i)
+                }
+                expr::BoolLiteral(b) => {
+                    value::bool_literal(ty, b)
                 }
                 expr::Variable(ref name) => {
                     if let Some(val) = locals.get(name) {
@@ -60,7 +64,6 @@ impl expr {
                         value::parameter(ty.clone(), function, name)
                     }
                 }
-                // TODO(ubsan): fix || and &&
                 expr::Binop {
                     op: operand::OrOr,
                     lhs,
@@ -68,7 +71,7 @@ impl expr {
                 } => {
                     expr::If {
                         condition: lhs,
-                        then_value: Box::new(expr::IntLiteral(1)),
+                        then_value: Box::new(expr::BoolLiteral(true)),
                         else_value: rhs,
                     }.translate(ty, function, locals, builder, ast)
                 }
@@ -79,7 +82,7 @@ impl expr {
                 } => {
                     expr::If {
                         condition: Box::new(expr::Not(lhs)),
-                        then_value: Box::new(expr::IntLiteral(1)),
+                        then_value: Box::new(expr::BoolLiteral(false)),
                         else_value: rhs,
                     }.translate(ty, function, locals, builder, ast)
                 }
@@ -127,7 +130,7 @@ impl expr {
                     LLVMBuildBr(builder, join_blk);
 
                     LLVMPositionBuilderAtEnd(builder, join_blk);
-                    let res = LLVMBuildPhi(builder, LLVMInt32Type(), cstr!(""));
+                    let res = LLVMBuildPhi(builder, ty.to_llvm(), cstr!(""));
                     let mut phi_vals = [then_res.raw, else_res.raw];
                     let mut preds = [then_end_blk, else_end_blk];
                     LLVMAddIncoming(res, phi_vals.as_mut_ptr(), preds.as_mut_ptr(), 2);
@@ -475,6 +478,26 @@ impl value {
                 Ok(value {
                     ty: ty,
                     raw: unsafe { LLVMConstInt(llvm_ty, val, false as LLVMBool) },
+                })
+            }
+            ty => {
+                Err(ast_error::IncorrectType {
+                    expected: ty,
+                    found: ty::Generic,
+                    compiler: fl!(),
+                })
+            }
+        }
+    }
+
+    fn bool_literal(ty: ty, val: bool) -> Result<value, ast_error> {
+        match ty {
+            ty::Bool | ty::Generic => {
+                let ty = ty::Bool;
+                let llvm_ty = ty.to_llvm();
+                Ok(value {
+                    ty: ty,
+                    raw: unsafe { LLVMConstInt(llvm_ty, val as u64, false as LLVMBool) },
                 })
             }
             ty => {

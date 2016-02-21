@@ -20,7 +20,7 @@ use trans::ast;
 fn main() {
     use std::io::Read;
     let mut file = Vec::new();
-    std::fs::File::open("test.rmm").expect("test.rmm")
+    std::fs::File::open("test.pnk").expect("test.rmm")
         .read_to_end(&mut file).unwrap();
     let file = String::from_utf8(file).unwrap();
     let lexer = lexer::new(&file);

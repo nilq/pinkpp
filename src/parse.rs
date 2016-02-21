@@ -621,8 +621,8 @@ impl<'src> parser<'src> {
             token::Operand(operand::Not) => {
                 Ok(Some(expr::Not(Box::new(try!(self.parse_single_expr(line!()))))))
             }
-            token::KeywordTrue => Ok(Some(expr::IntLiteral(1))),
-            token::KeywordFalse => Ok(Some(expr::IntLiteral(0))),
+            token::KeywordTrue => Ok(Some(expr::BoolLiteral(true))),
+            token::KeywordFalse => Ok(Some(expr::BoolLiteral(false))),
             tok => {
                 self.unget_token(tok);
                 Ok(None)
