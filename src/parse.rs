@@ -1,5 +1,4 @@
-use std;
-use std::str;
+use std::{ self, str };
 use trans::{ expr, stmt, item };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -17,8 +16,6 @@ pub enum token {
     KeywordFalse,
     KeywordIf,
     KeywordElse,
-    BitNot,
-    Not,
     Ident(String),
     Integer(u64),
 
@@ -29,7 +26,9 @@ pub enum token {
     CloseParen,
     OpenBrace,
     Semicolon,
+    Colon,
     Comma,
+    SkinnyArrow,
     Equals,
     Eof,
 }
@@ -43,13 +42,12 @@ impl token {
                 => token_type::Statement,
 
             token::KeywordTrue | token::KeywordFalse | token::KeywordIf |
-            token::Ident(_) | token::Integer(_) | token::Not | token::BitNot
-                => token_type::Expression,
+            token::Ident(_) | token::Integer(_) => token_type::Expression,
 
             token::Operand(_) => token_type::Operand,
 
             token::KeywordElse | token::OpenParen | token::CloseParen |
-            token::OpenBrace |  token::Semicolon |
+            token::OpenBrace |  token::Semicolon | token::Colon | token::SkinnyArrow |
             token::Comma | token::Equals | token::Eof => token_type::Misc,
         }
     }
@@ -67,9 +65,11 @@ pub enum operand {
     Shl,
     Shr,
 
-    BitAnd,
-    BitXor,
-    BitOr,
+    And,
+    Xor,
+    Or,
+
+    Not,
 
     EqualsEquals,
     NotEquals,
@@ -82,45 +82,20 @@ pub enum operand {
     OrOr,
 }
 
-impl std::fmt::Display for operand {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        let s = match *self {
-            operand::Mul => "*",
-            operand::Div => "/",
-            operand::Rem => "%",
-            operand::Plus => "+",
-            operand::Minus => "-",
-            operand::Shl => "<<",
-            operand::Shr => ">>",
-            operand::BitAnd => "&",
-            operand::BitXor => "^",
-            operand::BitOr => "|",
-            operand::EqualsEquals => "==",
-            operand::NotEquals => "!=",
-            operand::LessThan => "<",
-            operand::LessThanEquals => "<=",
-            operand::GreaterThan => ">",
-            operand::GreaterThanEquals => ">=",
-            operand::AndAnd => "&&",
-            operand::OrOr => "||",
-        };
-        f.write_str(s)
-    }
-}
-
 impl operand {
     pub fn precedence(&self) -> u8 {
         match *self {
             operand::Mul | operand::Div | operand::Rem => 9,
             operand::Plus | operand::Minus => 8,
             operand::Shl | operand::Shr => 7,
-            operand::BitAnd => 6,
-            operand::BitXor => 5,
-            operand::BitOr => 4,
+            operand::And => 6,
+            operand::Xor => 5,
+            operand::Or => 4,
             operand::EqualsEquals | operand::NotEquals | operand::LessThan |
             operand::LessThanEquals | operand::GreaterThan | operand::GreaterThanEquals => 3,
             operand::AndAnd => 2,
             operand::OrOr => 1,
+            operand::Not => unreachable!("Not (`!`) is not a binop")
         }
     }
 
@@ -157,7 +132,7 @@ impl<'src> lexer<'src> {
         lexer {
             src: src.chars(),
             readahead: Vec::with_capacity(1),
-            line: 0,
+            line: 1,
         }
     }
 
@@ -269,12 +244,23 @@ impl<'src> lexer<'src> {
             '{' => Ok(token::OpenBrace),
             '}' => Ok(token::CloseBrace),
             ';' => Ok(token::Semicolon),
+            ':' => Ok(token::Colon),
             ',' => Ok(token::Comma),
-            '~' => Ok(token::BitNot),
             '*' => Ok(token::Operand(operand::Mul)),
             '%' => Ok(token::Operand(operand::Rem)),
             '+' => Ok(token::Operand(operand::Plus)),
-            '-' => Ok(token::Operand(operand::Minus)),
+            '-' => {
+                match self.getc() {
+                    Some('>') => {
+                        return Ok(token::SkinnyArrow);
+                    }
+                    Some(c) => {
+                        self.ungetc(c)
+                    }
+                    None => { }
+                }
+                Ok(token::Operand(operand::Minus))
+            }
             '/' => {
                 match self.getc() {
                     Some('*') => {
@@ -303,7 +289,7 @@ impl<'src> lexer<'src> {
                     }
                     None => {}
                 }
-                Ok(token::Not)
+                Ok(token::Operand(operand::Not))
             }
             '<' => {
                 match self.getc() {
@@ -357,7 +343,7 @@ impl<'src> lexer<'src> {
                     }
                     None => {}
                 }
-                Ok(token::Operand(operand::BitAnd))
+                Ok(token::Operand(operand::And))
             }
             '|' => {
                 match self.getc() {
@@ -369,7 +355,7 @@ impl<'src> lexer<'src> {
                     }
                     None => {}
                 }
-                Ok(token::Operand(operand::BitOr))
+                Ok(token::Operand(operand::Or))
             }
 
             'a'...'z' | 'A'...'Z' | '_' => {
@@ -415,7 +401,7 @@ impl<'src> lexer<'src> {
                 Err(parser_error::InvalidToken {
                     token: i,
                     line: self.line,
-                    compiler_line: line!(),
+                    compiler: fl!(),
                 })
             }
         }
@@ -427,21 +413,30 @@ pub enum parser_error {
     ExpectedEof,
 
     UnclosedComment,
+    UnknownType {
+        found: String,
+        line: u32,
+        compiler: (&'static str, u32),
+    },
     InvalidToken {
         token: char,
         line: u32,
-        compiler_line: u32,
+        compiler: (&'static str, u32),
     },
     DuplicatedFunctionArgument {
         argument: String,
         function: String,
-        compiler_line: u32,
+        compiler: (&'static str, u32),
+    },
+    DuplicatedFunction {
+        function: String,
+        compiler: (&'static str, u32),
     },
     UnexpectedToken {
         found: token,
         expected: token_type,
         line: u32,
-        compiler_line: u32,
+        compiler: (&'static str, u32),
     },
 }
 
@@ -481,7 +476,7 @@ impl<'src> parser<'src> {
                 found: tok,
                 expected: token_type::Item,
                 line: self.line(),
-                compiler_line: line!(),
+                compiler: fl!(),
             }),
         }
     }
@@ -509,8 +504,8 @@ impl<'src> parser<'src> {
         Ok(None)
     }
 
-    fn eat_ty(&mut self, expected: token_type, line: u32) -> Result<token, parser_error> {
-        match self.maybe_eat_ty(&expected, line) {
+    fn eat_ty(&mut self, expected: token_type, compiler_line: u32) -> Result<token, parser_error> {
+        match self.maybe_eat_ty(&expected, compiler_line) {
             Ok(Some(t)) => return Ok(t),
             Err(e) => return Err(e),
             _ => {},
@@ -519,7 +514,7 @@ impl<'src> parser<'src> {
             found: try!(self.get_token()),
             expected: expected,
             line: self.line(),
-            compiler_line: line,
+            compiler: (file!(), compiler_line),
         })
     }
 
@@ -531,7 +526,7 @@ impl<'src> parser<'src> {
         self.eat_ty(token_type::Specific(expected), line)
     }
 
-    fn parse_ident(&mut self) -> Result<String, parser_error> {
+    fn parse_ident(&mut self, line: u32) -> Result<String, parser_error> {
         match try!(self.get_token()) {
             token::Ident(s) => Ok(s),
             tok => {
@@ -539,9 +534,26 @@ impl<'src> parser<'src> {
                     found: tok,
                     expected: token_type::Specific(token::Ident(String::new())),
                     line: self.line(),
-                    compiler_line: line!(),
+                    compiler: (file!(), line),
                 })
             }
+        }
+    }
+
+    fn parse_ty(&mut self, line: u32) -> Result<ty, parser_error> {
+        match try!(self.get_token()) {
+            token::Ident(s) => ty::from_str(&s, line!()),
+            token::OpenParen => {
+                try!(self.eat(token::CloseParen, line!()));
+                Ok(ty::Unit)
+            }
+            tok => Err(parser_error::UnexpectedToken {
+                found: tok,
+                expected: token_type::AnyOf(vec![token::Ident(String::new()),
+                    token::OpenParen]),
+                line: self.line(),
+                compiler: (file!(), line),
+            })
         }
     }
 
@@ -553,7 +565,7 @@ impl<'src> parser<'src> {
                     if let Some(e) = try!(self.maybe_parse_expr()) {
                         args.push(e);
                         while let Some(_) = try!(self.maybe_eat(token::Comma, line!())) {
-                            args.push(try!(self.parse_expr()));
+                            args.push(try!(self.parse_expr(line!())));
                         }
                     }
                     try!(self.eat(token::CloseParen, line!()));
@@ -566,9 +578,9 @@ impl<'src> parser<'src> {
                 }
             }
             token::KeywordIf => {
-                let condition = try!(self.parse_expr());
+                let condition = try!(self.parse_expr(line!()));
                 try!(self.eat(token::OpenBrace, line!()));
-                let if_value = try!(self.parse_expr());
+                let if_value = try!(self.parse_expr(line!()));
                 try!(self.eat(token::CloseBrace, line!()));
                 try!(self.eat(token::KeywordElse, line!()));
 
@@ -576,13 +588,13 @@ impl<'src> parser<'src> {
                 match try!(self.eat_ty(token_type::AnyOf(
                         vec![token::OpenBrace, token::KeywordIf]), line!())) {
                     token::OpenBrace => {
-                        let expr = try!(self.parse_expr());
+                        let expr = try!(self.parse_expr(line!()));
                         try!(self.eat(token::CloseBrace, line!()));
                         expr
                     }
                     token::KeywordIf => {
                         self.unget_token(token::KeywordIf);
-                        try!(self.parse_expr())
+                        try!(self.parse_expr(line!()))
                     }
                     tok => unreachable!("{:?}", tok),
                 };
@@ -593,24 +605,24 @@ impl<'src> parser<'src> {
                 }))
             }
             token::Integer(value) => {
-                Ok(Some(expr::Literal(value as u32)))
+                Ok(Some(expr::IntLiteral(value)))
             }
             token::OpenParen => {
-                let expr = try!(self.parse_expr());
+                let expr = try!(self.parse_expr(line!()));
                 try!(self.eat(token::CloseParen, line!()));
                 Ok(Some(expr))
             }
             token::Operand(operand::Minus) => {
-                Ok(Some(expr::Minus(Box::new(try!(self.parse_single_expr())))))
+                Ok(Some(expr::Minus(Box::new(try!(self.parse_single_expr(line!()))))))
             }
             token::Operand(operand::Plus) => {
-                Ok(Some(expr::Plus(Box::new(try!(self.parse_single_expr())))))
+                Ok(Some(expr::Plus(Box::new(try!(self.parse_single_expr(line!()))))))
             }
-            token::Not => {
-                Ok(Some(expr::Not(Box::new(try!(self.parse_single_expr())))))
+            token::Operand(operand::Not) => {
+                Ok(Some(expr::Not(Box::new(try!(self.parse_single_expr(line!()))))))
             }
-            token::KeywordTrue => Ok(Some(expr::Literal(1))),
-            token::KeywordFalse => Ok(Some(expr::Literal(0))),
+            token::KeywordTrue => Ok(Some(expr::IntLiteral(1))),
+            token::KeywordFalse => Ok(Some(expr::IntLiteral(0))),
             tok => {
                 self.unget_token(tok);
                 Ok(None)
@@ -618,14 +630,14 @@ impl<'src> parser<'src> {
         }
     }
 
-    fn parse_single_expr(&mut self) -> Result<expr, parser_error> {
+    fn parse_single_expr(&mut self, line: u32) -> Result<expr, parser_error> {
         match self.maybe_parse_single_expr() {
             Ok(Some(e)) => Ok(e),
             Ok(None) => Err(parser_error::UnexpectedToken {
                 found: try!(self.get_token()),
                 expected: token_type::Expression,
                 line: self.line(),
-                compiler_line: line!(),
+                compiler: (file!(), line),
             }),
             Err(e) => Err(e),
         }
@@ -647,8 +659,8 @@ impl<'src> parser<'src> {
         }
     }
 
-    fn parse_expr(&mut self) -> Result<expr, parser_error> {
-        let lhs = try!(self.parse_single_expr());
+    fn parse_expr(&mut self, line: u32) -> Result<expr, parser_error> {
+        let lhs = try!(self.parse_single_expr(line));
         match try!(self.maybe_eat_ty(&token_type::Operand, line!())) {
             Some(token::Operand(ref op)) => {
                 self.parse_binop(lhs, op)
@@ -661,7 +673,7 @@ impl<'src> parser<'src> {
     }
 
     fn parse_binop(&mut self, lhs: expr, left_op: &operand) -> Result<expr, parser_error> {
-        let rhs = try!(self.parse_single_expr());
+        let rhs = try!(self.parse_single_expr(line!()));
         match try!(self.maybe_eat_ty(&token_type::Operand, line!())) {
             Some(token::Operand(ref right_op)) => {
                 if left_op.precedence() >= right_op.precedence() {
@@ -678,18 +690,23 @@ impl<'src> parser<'src> {
     }
 
     fn function(&mut self) -> Result<item, parser_error> {
-        let name = try!(self.parse_ident());
+        let name = try!(self.parse_ident(line!()));
 
         try!(self.eat(token::OpenParen, line!()));
 
         let mut args = Vec::new();
         match try!(self.get_token()) {
             token::Ident(arg) => {
-                args.push(arg);
+                try!(self.eat(token::Colon, line!()));
+                let ty = try!(self.parse_ident(line!()));
+                args.push((arg, try!(ty::from_str(&ty, self.line()))));
                 loop {
                     let comma_or_close_paren = try!(self.get_token());
                     if let token::Comma = comma_or_close_paren {
-                        args.push(try!(self.parse_ident()));
+                        let name = try!(self.parse_ident(line!()));
+                        try!(self.eat(token::Colon, line!()));
+                        let ty = try!(self.parse_ident(line!()));
+                        args.push((name, try!(ty::from_str(&ty, self.line()))));
                     } else if let token::CloseParen = comma_or_close_paren {
                         break;
                     } else {
@@ -697,7 +714,7 @@ impl<'src> parser<'src> {
                             found: comma_or_close_paren,
                             expected: token_type::AnyOf(vec![token::Comma, token::CloseParen]),
                             line: self.line(),
-                            compiler_line: line!(),
+                            compiler: fl!(),
                         });
                     }
                 }
@@ -709,27 +726,35 @@ impl<'src> parser<'src> {
                     expected: token_type::AnyOf(vec![token::Ident(String::new()),
                         token::CloseParen]),
                     line: self.line(),
-                    compiler_line: line!(),
+                    compiler: fl!(),
                 });
             }
         }
 
-        // TODO(ubsan): parse return
+        let ret_ty = match try!(self.maybe_eat(token::SkinnyArrow, line!())) {
+            Some(_) => {
+                try!(self.parse_ty(line!()))
+            }
+            None => ty::Unit,
+        };
         try!(self.eat(token::OpenBrace, line!()));
 
         let mut body = Vec::new();
         loop {
             match try!(self.eat_ty(token_type::Statement, line!())) {
                 token::KeywordReturn => {
-                    body.push(stmt::Return(try!(self.parse_expr())));
+                    body.push(stmt::Return(try!(self.maybe_parse_expr())));
                     try!(self.eat(token::Semicolon, line!()));
                 }
                 token::KeywordLet => {
-                    let name = try!(self.parse_ident());
+                    let name = try!(self.parse_ident(line!()));
+                    try!(self.eat(token::Colon, line!()));
+                    let ty = try!(self.parse_ty(line!()));
                     try!(self.eat(token::Equals, line!()));
-                    let expr = try!(self.parse_expr());
+                    let expr = try!(self.parse_expr(line!()));
                     body.push(stmt::Let {
                         name: name,
+                        ty: ty,
                         value: expr,
                     });
                     try!(self.eat(token::Semicolon, line!()));
@@ -739,6 +764,73 @@ impl<'src> parser<'src> {
             }
         }
 
-        Ok(item::Function { name: name, args: args, body: body })
+        Ok(item::Function { name: name, ret: ret_ty, args: args, body: body })
+    }
+}
+
+use llvm_sys::prelude::*;
+use llvm_sys::core::*;
+
+// TODO(ubsan): add proper bools
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ty {
+    Int(int),
+    Bool,
+    // UInt(int),
+    Unit,
+    Generic,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum int {
+    I32,
+}
+
+impl ty {
+    fn from_str(s: &str, line: u32) -> Result<ty, parser_error> {
+        match s {
+            "s32" => Ok(ty::Int(int::I32)),
+            "bool" => Ok(ty::Bool),
+            "()" => Ok(ty::Unit),
+            s => Err(parser_error::UnknownType {
+                found: s.to_owned(),
+                line: line,
+                compiler: fl!(),
+            }),
+        }
+    }
+
+    // TODO(ubsan): we need to convert zero sized return types into void
+    pub fn to_llvm(&self) -> LLVMTypeRef {
+        unsafe {
+            match *self {
+                ty::Int(int::I32) => LLVMInt32Type(),
+                ty::Bool => LLVMInt1Type(),
+                ty::Unit => LLVMStructType(std::ptr::null_mut(), 0, false as LLVMBool),
+                ty::Generic => unreachable!("Generic is not a real type"),
+            }
+        }
+    }
+
+    pub fn to_llvm_ret(&self) -> LLVMTypeRef {
+        unsafe {
+            match *self {
+                ty::Int(int::I32) => LLVMInt32Type(),
+                ty::Bool => LLVMInt1Type(),
+                ty::Unit => LLVMVoidType(),
+                ty::Generic => unreachable!("Generic is not a real type"),
+            }
+        }
+    }
+}
+
+impl int {
+    pub fn shift_mask(&self) -> u64 {
+        match *self {
+            // I8 => (1 << 3) - 1,
+            // I16 => (1 << 4) - 1,
+            int::I32 => (1 << 5) - 1,
+            // I64 => (1 << 6) - 1,
+        }
     }
 }

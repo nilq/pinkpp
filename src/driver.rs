@@ -8,6 +8,10 @@ macro_rules! cstr {
     )
 }
 
+macro_rules! fl {
+    () => ((file!(), line!()))
+}
+
 mod parse;
 mod trans;
 use parse::lexer;
