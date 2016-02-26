@@ -14,6 +14,7 @@ macro_rules! fl {
 
 mod parse;
 mod trans;
+mod ty;
 use parse::lexer;
 use trans::ast;
 

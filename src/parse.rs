@@ -1,5 +1,6 @@
-use std::{ self, str };
-use trans::{ expr, stmt, item };
+use std::str;
+use trans::{expr, stmt, item};
+use ty::ty;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum token {
@@ -765,72 +766,5 @@ impl<'src> parser<'src> {
         }
 
         Ok(item::Function { name: name, ret: ret_ty, args: args, body: body })
-    }
-}
-
-use llvm_sys::prelude::*;
-use llvm_sys::core::*;
-
-// TODO(ubsan): add proper bools
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ty {
-    Int(int),
-    Bool,
-    // UInt(int),
-    Unit,
-    Generic,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum int {
-    I32,
-}
-
-impl ty {
-    fn from_str(s: &str, line: u32) -> Result<ty, parser_error> {
-        match s {
-            "s32" => Ok(ty::Int(int::I32)),
-            "bool" => Ok(ty::Bool),
-            "()" => Ok(ty::Unit),
-            s => Err(parser_error::UnknownType {
-                found: s.to_owned(),
-                line: line,
-                compiler: fl!(),
-            }),
-        }
-    }
-
-    // TODO(ubsan): we need to convert zero sized return types into void
-    pub fn to_llvm(&self) -> LLVMTypeRef {
-        unsafe {
-            match *self {
-                ty::Int(int::I32) => LLVMInt32Type(),
-                ty::Bool => LLVMInt1Type(),
-                ty::Unit => LLVMStructType(std::ptr::null_mut(), 0, false as LLVMBool),
-                ty::Generic => unreachable!("Generic is not a real type"),
-            }
-        }
-    }
-
-    pub fn to_llvm_ret(&self) -> LLVMTypeRef {
-        unsafe {
-            match *self {
-                ty::Int(int::I32) => LLVMInt32Type(),
-                ty::Bool => LLVMInt1Type(),
-                ty::Unit => LLVMVoidType(),
-                ty::Generic => unreachable!("Generic is not a real type"),
-            }
-        }
-    }
-}
-
-impl int {
-    pub fn shift_mask(&self) -> u64 {
-        match *self {
-            // I8 => (1 << 3) - 1,
-            // I16 => (1 << 4) - 1,
-            int::I32 => (1 << 5) - 1,
-            // I64 => (1 << 6) - 1,
-        }
     }
 }
