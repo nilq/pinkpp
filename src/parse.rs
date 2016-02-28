@@ -18,7 +18,10 @@ pub enum token {
     KeywordIf,
     KeywordElse,
     Ident(String),
-    Integer(u64),
+    Integer {
+        value: u64,
+        suffix: String,
+    },
 
     Operand(operand),
 
@@ -43,7 +46,7 @@ impl token {
                 => token_type::Statement,
 
             token::KeywordTrue | token::KeywordFalse | token::KeywordIf |
-            token::Ident(_) | token::Integer(_) => token_type::Expression,
+            token::Ident(_) | token::Integer {..} => token_type::Expression,
 
             token::Operand(_) => token_type::Operand,
 
@@ -142,7 +145,7 @@ impl<'src> lexer<'src> {
         ret.push(first);
         loop {
             match self.getc() {
-                Some(c @ 'a'...'z') | Some(c @ 'A'...'Z') | Some(c @ '0'...'9') | Some(c @ '_') => {
+                Some(c) if Self::is_ident(c) => {
                     ret.push(c)
                 }
                 Some(c) => {
@@ -154,6 +157,21 @@ impl<'src> lexer<'src> {
         }
 
         ret
+    }
+
+    #[inline(always)]
+    fn is_start_of_ident(c: char) -> bool {
+        (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+    }
+
+    #[inline(always)]
+    fn is_ident(c: char) -> bool {
+        Self::is_start_of_ident(c) || Self::is_integer(c)
+    }
+
+    #[inline(always)]
+    fn is_integer(c: char) -> bool {
+        c >= '0' && c <= '9'
     }
 
     fn block_comment(&mut self) -> Result<(), parser_error> {
@@ -359,7 +377,7 @@ impl<'src> lexer<'src> {
                 Ok(token::Operand(operand::Or))
             }
 
-            'a'...'z' | 'A'...'Z' | '_' => {
+            c if Self::is_start_of_ident(c) => {
                 let ident = self.ident(first);
                 match &ident[..] {
                     "fn" => return Ok(token::KeywordFn),
@@ -374,11 +392,10 @@ impl<'src> lexer<'src> {
 
                 Ok(token::Ident(ident))
             }
-            '0'...'9' => {
+            c if Self::is_integer(c) => {
                 let mut string = String::new();
-                if first != '-' {
-                    string.push(first);
-                }
+                string.push(c);
+                let mut suffix = String::new();
                 loop {
                     match self.getc() {
                         Some(c @ '0'...'9') => {
@@ -391,11 +408,26 @@ impl<'src> lexer<'src> {
                         None => break,
                     }
                 }
+                loop {
+                    match self.getc() {
+                        Some(c) if Self::is_ident(c) => {
+                            suffix.push(c)
+                        }
+                        Some(c) => {
+                            self.ungetc(c);
+                            break;
+                        }
+                        None => break,
+                    }
+                }
 
                 let value = string.parse::<u64>()
                     .expect("we pushed something which wasn't 0...9 onto a string");
 
-                Ok(token::Integer(value))
+                Ok(token::Integer {
+                    value: value,
+                    suffix: suffix,
+                })
             }
 
             i => {
@@ -436,6 +468,11 @@ pub enum parser_error {
     UnexpectedToken {
         found: token,
         expected: token_type,
+        line: u32,
+        compiler: (&'static str, u32),
+    },
+    InvalidSuffix {
+        suffix: String,
         line: u32,
         compiler: (&'static str, u32),
     },
@@ -605,8 +642,27 @@ impl<'src> parser<'src> {
                     else_value: Box::new(else_value),
                 }))
             }
-            token::Integer(value) => {
-                Ok(Some(expr::IntLiteral(value)))
+            token::Integer {value, suffix} => {
+                if suffix == "" {
+                    return Ok(Some(expr::IntLiteral {
+                        value: value,
+                        ty: ty::Generic,
+                    }));
+                }
+                match ty::from_str(&suffix, self.line()) {
+                    Ok(ty @ ty::SInt(_)) | Ok(ty @ ty::UInt(_)) => {
+                        return Ok(Some(expr::IntLiteral {
+                            value: value,
+                            ty: ty,
+                        }));
+                    }
+                    _ => {}
+                }
+                Err(parser_error::InvalidSuffix {
+                    suffix: suffix,
+                    line: self.line(),
+                    compiler: fl!(),
+                })
             }
             token::OpenParen => {
                 let expr = try!(self.parse_expr(line!()));
@@ -624,6 +680,11 @@ impl<'src> parser<'src> {
             }
             token::KeywordTrue => Ok(Some(expr::BoolLiteral(true))),
             token::KeywordFalse => Ok(Some(expr::BoolLiteral(false))),
+            token::KeywordReturn => {
+                let ret = try!(self.parse_expr(line!()));
+                try!(self.eat(token::Semicolon, line!()));
+                Ok(Some(expr::Return(Box::new(ret))))
+            },
             tok => {
                 self.unget_token(tok);
                 Ok(None)
@@ -744,7 +805,11 @@ impl<'src> parser<'src> {
         loop {
             match try!(self.eat_ty(token_type::Statement, line!())) {
                 token::KeywordReturn => {
-                    body.push(stmt::Return(try!(self.maybe_parse_expr())));
+                    if let Some(e) = try!(self.maybe_parse_expr()) {
+                        body.push(stmt::Expr(expr::Return(Box::new(e))));
+                    } else {
+                        body.push(stmt::Expr(expr::Return(Box::new(expr::UnitLiteral))));
+                    }
                     try!(self.eat(token::Semicolon, line!()));
                 }
                 token::KeywordLet => {
@@ -756,7 +821,7 @@ impl<'src> parser<'src> {
                     body.push(stmt::Let {
                         name: name,
                         ty: ty,
-                        value: expr,
+                        value: Box::new(expr),
                     });
                     try!(self.eat(token::Semicolon, line!()));
                 }

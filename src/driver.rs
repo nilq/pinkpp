@@ -30,6 +30,8 @@ fn main() {
         Ok(ast) => ast,
         Err(e) => panic!("\n{:#?}", e),
     };
-
-    ast.build().unwrap();
+    match ast.build() {
+        Ok(_) => {},
+        Err(e) => panic!("\n{:#?}", e),
+    }
 }

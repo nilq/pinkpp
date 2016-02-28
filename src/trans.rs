@@ -12,8 +12,15 @@ use llvm_sys::analysis::*;
 use llvm_sys::analysis::LLVMVerifierFailureAction::*;
 use llvm_sys::core::*;
 
-// TODO(ubsan): start taking &mut self?
-
+#[derive(Debug)]
+pub enum stmt {
+    Let {
+        name: String,
+        ty: ty,
+        value: Box<expr>,
+    },
+    Expr(expr),
+}
 
 #[derive(Debug)]
 pub enum expr {
@@ -35,19 +42,39 @@ pub enum expr {
     Minus(Box<expr>), // unary minus
     Not(Box<expr>), // !expr
     Variable(String),
-    IntLiteral(u64),
+    IntLiteral {
+        value: u64,
+        ty: ty,
+    },
     BoolLiteral(bool),
+    UnitLiteral,
+    Return(Box<expr>),
 }
 
 impl expr {
     fn translate<'a>(self, ty: ty, function: &'a function, locals: &HashMap<String, value>,
             block: &mut block<'a>, ast: &ast) -> Result<value, ast_error> {
         match self {
-            expr::IntLiteral(i) => {
-                value::int_literal(ty, i)
+            expr::IntLiteral {value, ty: lit_ty} => {
+                if lit_ty == ty::Generic {
+                    value::int_literal(ty, value)
+                } else if ty == ty::Generic {
+                    value::int_literal(lit_ty, value)
+                } else if ty == lit_ty {
+                    value::int_literal(ty, value)
+                } else {
+                    Err(ast_error::IncorrectType {
+                        expected: ty,
+                        found: lit_ty,
+                        compiler: fl!(),
+                    })
+                }
             }
             expr::BoolLiteral(b) => {
                 value::bool_literal(ty, b)
+            }
+            expr::UnitLiteral => {
+                value::unit_literal(ty)
             }
             expr::Variable(ref name) => {
                 if let Some(val) = locals.get(name) {
@@ -93,42 +120,66 @@ impl expr {
             } => {
                 let lhs = try!(lhs.translate(ty::Generic, function, locals, block, ast));
                 let rhs = try!(rhs.translate(ty::Generic, function, locals, block, ast));
-                value::binop(ty, &op, lhs, rhs, block.builder)
+                value::binop(ty, &op, lhs, rhs, block.builder())
             }
             expr::Plus(inner) => {
                 inner.translate(ty, function, locals, block, ast)
             }
             expr::Minus(inner) => {
                 inner.translate(ty.clone(), function, locals, block, ast)
-                    .and_then(|v| v.neg(block.builder, ty))
+                    .and_then(|v| v.neg(block.builder(), ty))
             }
             expr::Not(inner) => {
                 inner.translate(ty.clone(), function, locals, block, ast)
-                    .and_then(|v| v.not(block.builder, ty))
+                    .and_then(|v| v.not(block.builder(), ty))
             }
             expr::If {
                 condition,
                 then_value,
                 else_value,
             } => {
-                let mut then_blk = block::new(function);
-                let mut else_blk = block::new(function);
-                let mut join_blk = block::new(function);
-
                 let cond = try!(condition.translate(ty::Bool, function, locals, block, ast));
-                block.conditional_branch(cond, &then_blk, &else_blk);
+                let res = if block.is_live() {
+                    let mut then_blk = block::new(function, "then");
+                    let mut else_blk = block::new(function, "else");
+                    let mut join_blk = block::new(function, "join");
+                    block.conditional_branch(cond, &then_blk, &else_blk);
 
-                let then_res = try!(then_value.translate(ty.clone(), function, locals, &mut then_blk, ast));
-                then_blk.branch(&join_blk);
+                    let then_res = try!(then_value.translate(ty.clone(), function, locals, &mut then_blk, ast));
+                    let then_live = if then_blk.is_live() {
+                        then_blk.branch(&join_blk);
+                        true
+                    } else {
+                        false
+                    };
 
-                let else_res = try!(else_value.translate(ty.clone(), function, locals, &mut else_blk, ast));
-                else_blk.branch(&join_blk);
+                    let else_res = try!(else_value.translate(ty.clone(), function, locals, &mut else_blk, ast));
+                    let else_live = if else_blk.is_live() {
+                        else_blk.branch(&join_blk);
+                        true
+                    } else {
+                        false
+                    };
 
-                // this is not guaranteed to be correct.
-                // I'm going to switch to a better style in the future
-                // (memory writes)
-                let res = join_blk.phi((then_res, &then_blk), (else_res, &else_blk));
-                *block = join_blk;
+                    // this is not guaranteed to be correct.
+                    // I'm going to switch to a better style in the future
+                    // (memory writes)
+                    let then = if then_live {
+                        Some((then_res, &then_blk))
+                    } else {
+                        None
+                    };
+                    let else_ = if else_live {
+                        Some((else_res, &else_blk))
+                    } else {
+                        None
+                    };
+                    let res = join_blk.phi(ty, then, else_);
+                    *block = join_blk;
+                    res
+                } else {
+                    value::undef(ty)
+                };
                 Ok(res)
             }
             expr::Call {
@@ -140,21 +191,20 @@ impl expr {
                 for (arg, ty) in args.into_iter().zip(try!(ast.fn_params(&name)).iter()) {
                     llvm_args.push(try!(arg.translate(ty.clone(), function, locals, block, ast)));
                 }
-                ast.call(ty, &name, block.builder, llvm_args)
+                ast.call(ty, &name, block.builder(), llvm_args)
+            }
+            expr::Return(expr) => {
+                let ret = try!(expr.translate(ty.clone(), function, locals, block, ast));
+                block.ret(ret);
+                match ty {
+                    ty::Generic => unimplemented!(),
+                    ty => Ok(value::undef(ty)),
+                }
             }
         }
     }
 }
 
-#[derive(Debug)]
-pub enum stmt {
-    Return(Option<expr>),
-    Let {
-        name: String,
-        ty: ty,
-        value: expr,
-    },
-}
 
 #[derive(Debug)]
 pub enum item {
@@ -214,47 +264,37 @@ impl function {
     }
 
     fn add_body(&self, body: Vec<stmt>, ast: &ast) -> Result<(), ast_error> {
-        unsafe {
-            let mut block = block::new(self);
-            let mut locals = HashMap::new();
+        let mut block = block::new(self, "entry");
+        let mut locals = HashMap::new();
 
-            for st in body {
-                match st {
-                    stmt::Let {
-                        name,
-                        ty,
-                        value,
-                    } => {
-                        let local = try!(value.translate(ty, self, &locals, &mut block, ast));
-                        locals.insert(name, local);
-                    }
-                    stmt::Return(expr) => {
-                        if let Some(e) = expr {
-                            // return expr;
-                            let tmp = try!(e.translate(self.ret_ty.clone(),
-                                self, &locals, &mut block, ast));
-                            debug_assert!(self.ret_ty == tmp.ty,
-                                "ret: {:?} != tmp: {:?}", self.ret_ty, tmp.ty);
-                            if self.ret_ty == ty::Unit {
-                                LLVMBuildRetVoid(block.builder);
-                            } else {
-                                LLVMBuildRet(block.builder, tmp.raw);
-                            }
-                        } else {
-                            // return;
-                            if self.ret_ty == ty::Unit {
-                                LLVMBuildRetVoid(block.builder);
-                            } else {
-                                return Err(ast_error::IncorrectType {
-                                    expected: self.ret_ty.clone(),
-                                    found: ty::Unit,
-                                    compiler: fl!(),
-                                });
-                            }
-                        }
-                    }
+        for st in body {
+            match st {
+                stmt::Let {
+                    name,
+                    ty,
+                    value,
+                } => {
+                    let local = try!(value.translate(ty, self, &locals, &mut block, ast));
+                    locals.insert(name, local);
                 }
+                stmt::Expr(e @ expr::Return(_)) => {
+                    // return expr;
+                    try!(e.translate(self.ret_ty.clone(),
+                        self, &locals, &mut block, ast));
+                }
+                _ => {
+                    if block.is_live() {
+                        block.terminate();
+                    }
+                    panic!("well parsing worked");
+                },
             }
+        }
+        if block.is_live() {
+            block.terminate();
+            return Err(ast_error::NoReturn {
+                function_name: self.dbg_name.clone()
+            });
         }
         Ok(())
     }
@@ -286,6 +326,10 @@ pub enum ast_error {
         op: operand,
         inner: ty,
     },
+    NoReturn {
+        function_name: String,
+    },
+    UnknownType(&'static str),
 }
 
 pub struct ast {
@@ -351,12 +395,8 @@ impl ast {
             LLVMDisposeMessage(error);
 
             if let Some(main) = self.functions.get("main") {
-                if main.ret_ty != ty::Int(int::I32) {
-                    return Err(ast_error::IncorrectType {
-                        expected: ty::Int(int::I32),
-                        found: main.ret_ty.clone(),
-                        compiler: fl!(),
-                    });
+                if main.ret_ty == ty::Generic {
+                    unreachable!("Generic is not a real type. No function should have that type")
                 }
                 if main.args_ty.len() != 0 {
                     return Err(ast_error::IncorrectNumberOfArguments {
@@ -379,7 +419,18 @@ impl ast {
                 }
 
                 let res = LLVMRunFunction(engine, main.raw, 0, std::ptr::null_mut());
-                println!("{}", LLVMGenericValueToInt(res, true as LLVMBool) as i32);
+                match main.ret_ty {
+                    ty::SInt(int::I32) => {
+                        println!("{}", LLVMGenericValueToInt(res, true as LLVMBool) as i32);
+                    }
+                    ty::UInt(int::I32) => {
+                        println!("{}", LLVMGenericValueToInt(res, true as LLVMBool) as u32);
+                    }
+                    ty::Unit => {}
+                    ref ty => {
+                        println!("Pink does not yet support printing the {:?} return type", ty);
+                    }
+                }
 
                 LLVMDisposeGenericValue(res);
                 LLVMDisposeExecutionEngine(engine);
@@ -458,7 +509,7 @@ struct value {
 impl value {
     fn int_literal(ty: ty, val: u64) -> Result<value, ast_error> {
         match ty {
-            ty::Int(_) | ty::UInt(_) => {
+            ty::SInt(_) | ty::UInt(_) => {
                 let llvm_ty = ty.to_llvm();
                 Ok(value {
                     ty: ty,
@@ -466,12 +517,7 @@ impl value {
                 })
             }
             ty::Generic => {
-                let ty = ty::Int(int::I32); // TODO(ubsan): real int generics
-                let llvm_ty = ty.to_llvm();
-                Ok(value {
-                    ty: ty,
-                    raw: unsafe { LLVMConstInt(llvm_ty, val, false as LLVMBool) },
-                })
+                Err(ast_error::UnknownType("int literal"))
             }
             ty => {
                 Err(ast_error::IncorrectType {
@@ -500,6 +546,31 @@ impl value {
                     compiler: fl!(),
                 })
             }
+        }
+    }
+
+    fn unit_literal(ty: ty) -> Result<value, ast_error> {
+        match ty {
+            ty::Unit | ty::Generic => {
+                Ok(value {
+                    raw: unsafe { LLVMConstStruct([].as_mut_ptr(), 0, false as LLVMBool) },
+                    ty: ty::Unit,
+                })
+            }
+            ty => {
+                Err(ast_error::IncorrectType {
+                    expected: ty,
+                    found: ty::Unit,
+                    compiler: fl!(),
+                })
+            }
+        }
+    }
+
+    fn undef(ty: ty) -> value {
+        value {
+            raw: unsafe { LLVMGetUndef(ty.to_llvm()) },
+            ty: ty,
         }
     }
 
@@ -557,7 +628,7 @@ impl value {
     fn mul(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == rhs.ty && self.ty == ty {
             match self.ty {
-                ty::Int(_) | ty::UInt(_) => {
+                ty::SInt(_) | ty::UInt(_) => {
                     return Ok(value {
                         raw: unsafe { LLVMBuildMul(builder, self.raw, rhs.raw, cstr!("")) },
                         ty: self.ty,
@@ -574,7 +645,7 @@ impl value {
     fn div(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == rhs.ty && self.ty == ty {
             match self.ty {
-                ty::Int(_) => {
+                ty::SInt(_) => {
                     return Ok(value {
                         raw: unsafe { LLVMBuildSDiv(builder, self.raw, rhs.raw, cstr!("")) },
                         ty: self.ty,
@@ -597,7 +668,7 @@ impl value {
     fn rem(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == rhs.ty && self.ty == ty {
             match self.ty {
-                ty::Int(_) => {
+                ty::SInt(_) => {
                     return Ok(value {
                         raw: unsafe { LLVMBuildSRem(builder, self.raw, rhs.raw, cstr!("")) },
                         ty: self.ty,
@@ -620,7 +691,7 @@ impl value {
     fn add(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == rhs.ty && self.ty == ty {
             match self.ty {
-                ty::Int(_) | ty::UInt(_) => {
+                ty::SInt(_) | ty::UInt(_) => {
                     return Ok(value {
                         raw: unsafe { LLVMBuildAdd(builder, self.raw, rhs.raw, cstr!("")) },
                         ty: self.ty,
@@ -637,7 +708,7 @@ impl value {
     fn sub(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == rhs.ty && self.ty == ty {
             match self.ty {
-                ty::Int(_) | ty::UInt(_) => {
+                ty::SInt(_) | ty::UInt(_) => {
                     return Ok(value {
                         raw: unsafe { LLVMBuildSub(builder, self.raw, rhs.raw, cstr!("")) },
                         ty: self.ty,
@@ -651,12 +722,13 @@ impl value {
             lhs: self.ty, rhs: rhs.ty,
         })
     }
+    // TODO(ubsan): assert! that the value is correctly sized
     fn shl(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == ty {
             match rhs.ty {
-                ty::Int(_) | ty::UInt(_) => {
+                ty::SInt(_) | ty::UInt(_) => {
                     match self.ty {
-                        ty::Int(ref lt) | ty::UInt(ref lt) => unsafe {
+                        ty::SInt(ref lt) | ty::UInt(ref lt) => unsafe {
                             let shift_mask = lt.shift_mask();
                             let safe_rhs = LLVMBuildAnd(builder, rhs.raw,
                                 LLVMConstInt(rhs.ty.to_llvm(), shift_mask, false as LLVMBool),
@@ -680,9 +752,9 @@ impl value {
     fn shr(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == ty {
             match rhs.ty {
-                ty::Int(_) | ty::UInt(_) => {
+                ty::SInt(_) | ty::UInt(_) => {
                     match self.ty {
-                        ty::Int(ref lt) => unsafe {
+                        ty::SInt(ref lt) => unsafe {
                             let shift_mask = lt.shift_mask();
                             let safe_rhs = LLVMBuildAnd(builder, rhs.raw,
                                 LLVMConstInt(rhs.ty.to_llvm(), shift_mask, false as LLVMBool),
@@ -716,7 +788,7 @@ impl value {
     fn and(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == rhs.ty && self.ty == ty {
             match self.ty {
-                ty::Int(_) | ty::UInt(_) | ty::Bool =>
+                ty::SInt(_) | ty::UInt(_) | ty::Bool =>
                     return Ok(value {
                         raw: unsafe { LLVMBuildAnd(builder, self.raw, rhs.raw, cstr!("")) },
                         ty: self.ty,
@@ -732,7 +804,7 @@ impl value {
     fn xor(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == rhs.ty && self.ty == ty {
             match self.ty {
-                ty::Int(_) | ty::UInt(_) | ty::Bool =>
+                ty::SInt(_) | ty::UInt(_) | ty::Bool =>
                     return Ok(value {
                         raw: unsafe { LLVMBuildXor(builder, self.raw, rhs.raw, cstr!("")) },
                         ty: self.ty,
@@ -748,7 +820,7 @@ impl value {
     fn or(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == rhs.ty && self.ty == ty {
             match self.ty {
-                ty::Int(_) | ty::UInt(_) | ty::Bool =>
+                ty::SInt(_) | ty::UInt(_) | ty::Bool =>
                     return Ok(value {
                         raw: unsafe { LLVMBuildOr(builder, self.raw, rhs.raw, cstr!("")) },
                         ty: self.ty,
@@ -765,7 +837,7 @@ impl value {
     fn eq(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == rhs.ty && ty == ty::Bool || ty == ty::Generic {
             match self.ty {
-                ty::Int(_) | ty::UInt(_) | ty::Bool =>
+                ty::SInt(_) | ty::UInt(_) | ty::Bool =>
                     return Ok(value {
                         raw: unsafe { LLVMBuildICmp(builder, LLVMIntEQ, self.raw, rhs.raw, cstr!("")) },
                         ty: ty::Bool,
@@ -781,7 +853,7 @@ impl value {
     fn neq(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == rhs.ty && ty == ty::Bool {
             match self.ty {
-                ty::Int(_) | ty::UInt(_) | ty::Bool =>
+                ty::SInt(_) | ty::UInt(_) | ty::Bool =>
                     return Ok(value {
                         raw: unsafe { LLVMBuildICmp(builder, LLVMIntNE, self.raw, rhs.raw, cstr!("")) },
                         ty: ty::Bool,
@@ -797,7 +869,7 @@ impl value {
     fn le(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == rhs.ty && ty == ty::Bool {
             match self.ty {
-                ty::Int(_) => {
+                ty::SInt(_) => {
                     return Ok(value {
                         raw: unsafe { LLVMBuildICmp(builder, LLVMIntSLT, self.raw, rhs.raw, cstr!("")) },
                         ty: ty::Bool,
@@ -820,7 +892,7 @@ impl value {
     fn lte(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == rhs.ty && ty == ty::Bool {
             match self.ty {
-                ty::Int(_) => {
+                ty::SInt(_) => {
                     return Ok(value {
                         raw: unsafe { LLVMBuildICmp(builder, LLVMIntSLE, self.raw, rhs.raw, cstr!("")) },
                         ty: ty::Bool,
@@ -843,7 +915,7 @@ impl value {
     fn gt(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == rhs.ty && ty == ty::Bool {
             match self.ty {
-                ty::Int(_) => {
+                ty::SInt(_) => {
                     return Ok(value {
                         raw: unsafe { LLVMBuildICmp(builder, LLVMIntSGT, self.raw, rhs.raw, cstr!("")) },
                         ty: ty::Bool,
@@ -866,7 +938,7 @@ impl value {
     fn gte(self, rhs: value, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == rhs.ty && ty == ty::Bool {
             match self.ty {
-                ty::Int(_) => {
+                ty::SInt(_) => {
                     return Ok(value {
                         raw: unsafe { LLVMBuildICmp(builder, LLVMIntSGE, self.raw, rhs.raw, cstr!("")) },
                         ty: ty::Bool,
@@ -890,7 +962,7 @@ impl value {
 
     fn neg(self, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == ty {
-            if let ty::Int(_) = self.ty {
+            if let ty::SInt(_) = self.ty {
                 return Ok(value {
                     raw: unsafe { LLVMBuildNeg(builder, self.raw, cstr!("")) },
                     ty: self.ty,
@@ -905,7 +977,7 @@ impl value {
     fn not(self, builder: LLVMBuilderRef, ty: ty) -> Result<value, ast_error> {
         if self.ty == ty {
             match self.ty {
-                ty::Int(_) | ty::UInt(_) | ty::Bool => {
+                ty::SInt(_) | ty::UInt(_) | ty::Bool => {
                     return Ok(value {
                         raw: unsafe { LLVMBuildNot(builder, self.raw, cstr!("")) },
                         ty: self.ty,
@@ -923,54 +995,112 @@ impl value {
 
 struct block<'a> {
     raw: LLVMBasicBlockRef,
-    builder: LLVMBuilderRef,
+    builder_: LLVMBuilderRef,
+    live: bool,
+    dbg_name: String,
     function: std::marker::PhantomData<&'a function>,
 }
 
 impl<'a> block<'a> {
-    fn new(function: &'a function) -> Self {
+    fn new(function: &'a function, name: &'static str) -> Self {
         unsafe {
             let builder = LLVMCreateBuilder();
             let raw = LLVMAppendBasicBlock(function.raw, cstr!("bb"));
             LLVMPositionBuilderAtEnd(builder, raw);
             block {
                 raw: raw,
-                builder: builder,
+                builder_: builder,
+                live: true,
+                dbg_name: format!("function: {}, block: {}", function.dbg_name, name),
                 function: std::marker::PhantomData,
             }
         }
     }
 
+    #[inline(always)]
+    pub fn is_live(&self) -> bool {
+        self.live
+    }
+
+    pub fn builder(&self) -> LLVMBuilderRef {
+        assert!(self.live);
+        self.builder_
+    }
+
+    /// terminator
+    fn terminate(&mut self) {
+        assert!(self.live);
+        self.live = false;
+    }
+
+    /// terminator
+    fn ret(&mut self, ret: value) {
+        assert!(self.live);
+        self.live = false;
+        if ret.ty == ty::Unit {
+            unsafe { LLVMBuildRetVoid(self.builder_); }
+        } else {
+            unsafe { LLVMBuildRet(self.builder_, ret.raw); }
+        }
+    }
+
+    /// terminator
     fn conditional_branch(&mut self, cond: value, then_blk: &block, else_blk: &block) {
+        assert!(self.live);
+        self.live = false;
         unsafe {
             assert!(cond.ty == ty::Bool, "ICE: condition is not a boolean");
-            LLVMBuildCondBr(self.builder, cond.raw, then_blk.raw, else_blk.raw);
+            LLVMBuildCondBr(self.builder_, cond.raw, then_blk.raw, else_blk.raw);
         }
     }
 
+    /// terminator
     fn branch(&mut self, block: &block) {
+        assert!(self.live);
+        self.live = false;
         unsafe {
-            LLVMBuildBr(self.builder, block.raw);
+            LLVMBuildBr(self.builder_, block.raw);
         }
     }
 
-    fn phi(&mut self, (then_res, then_blk): (value, &block),
-            (else_res, else_blk): (value, &block)) -> value {
-        unsafe {
-            assert!(then_res.ty == else_res.ty);
-            let res = LLVMBuildPhi(self.builder, then_res.ty.to_llvm(), cstr!(""));
-            let mut phi_vals = [then_res.raw, else_res.raw];
-            let mut preds = [then_blk.raw, else_blk.raw];
-            LLVMAddIncoming(res, phi_vals.as_mut_ptr(), preds.as_mut_ptr(), 2);
-            value { ty: then_res.ty, raw: res }
+    fn phi(&mut self, ty: ty, then: Option<(value, &block)>,
+            else_: Option<(value, &block)>) -> value {
+        assert!(self.live);
+        match (then, else_) {
+            (Some((then_res, then_blk)), Some((else_res, else_blk))) => {
+                unsafe {
+                    assert!(then_res.ty == ty, then_res.ty == else_res.ty);
+                    let ret = LLVMBuildPhi(self.builder_, then_res.ty.to_llvm(), cstr!(""));
+                    let mut phi_vals = [then_res.raw, else_res.raw];
+                    let mut preds = [then_blk.raw, else_blk.raw];
+                    LLVMAddIncoming(ret, phi_vals.as_mut_ptr(), preds.as_mut_ptr(), 2);
+                    value { ty: then_res.ty, raw: ret }
+                }
+            }
+            (Some((res, blk)), None) | (None, Some((res, blk))) => {
+                unsafe {
+                    assert!(res.ty == ty);
+                    let ret = LLVMBuildPhi(self.builder_, ty.to_llvm(), cstr!(""));
+                    let mut phi_vals = [res.raw];
+                    let mut preds = [blk.raw];
+                    LLVMAddIncoming(ret, phi_vals.as_mut_ptr(), preds.as_mut_ptr(), 1);
+                    value { ty: res.ty, raw: ret }
+                }
+            }
+            (None, None) => {
+                value::undef(ty)
+            }
         }
     }
 }
 
 impl<'a> std::ops::Drop for block<'a> {
     fn drop(&mut self) {
+        if self.live {
+            println!("dropped live block: {}", self.dbg_name)
+        }
         unsafe {
-            LLVMDisposeBuilder(self.builder);
+            LLVMDisposeBuilder(self.builder_);
         }
     }
 }
