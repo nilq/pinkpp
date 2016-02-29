@@ -19,6 +19,8 @@ pub enum stmt {
         ty: ty,
         value: Box<expr>,
     },
+    Stmt(expr),
+    // can only be the last statement in a body
     Expr(expr),
 }
 
@@ -267,7 +269,8 @@ impl function {
         let mut block = block::new(self, "entry");
         let mut locals = HashMap::new();
 
-        for st in body {
+        let mut body = body.into_iter();
+        while let Some(st) = body.next()  {
             match st {
                 stmt::Let {
                     name,
@@ -277,24 +280,34 @@ impl function {
                     let local = try!(value.translate(ty, self, &locals, &mut block, ast));
                     locals.insert(name, local);
                 }
-                stmt::Expr(e @ expr::Return(_)) => {
-                    // return expr;
+                stmt::Stmt(e) => {
                     try!(e.translate(self.ret_ty.clone(),
                         self, &locals, &mut block, ast));
-                }
-                _ => {
-                    if block.is_live() {
-                        block.terminate();
+                    if !block.is_live() {
+                        break;
                     }
-                    panic!("well parsing worked");
-                },
+                }
+                stmt::Expr(e) => {
+                    assert!(body.next().is_none());
+                    let ret = try!(e.translate(self.ret_ty.clone(),
+                        self, &locals, &mut block, ast));
+                    if block.is_live() {
+                        block.ret(ret);
+                    }
+                }
             }
         }
         if block.is_live() {
-            block.terminate();
-            return Err(ast_error::NoReturn {
-                function_name: self.dbg_name.clone()
-            });
+            if self.ret_ty == ty::Unit {
+                block.ret(value::unit_literal(ty::Unit).unwrap())
+            } else {
+                block.terminate();
+                return Err(ast_error::IncorrectType {
+                    expected: self.ret_ty.clone(),
+                    found: ty::Unit,
+                    compiler: fl!(),
+                });
+            }
         }
         Ok(())
     }
@@ -325,9 +338,6 @@ pub enum ast_error {
     UnopUnsupported {
         op: operand,
         inner: ty,
-    },
-    NoReturn {
-        function_name: String,
     },
     UnknownType(&'static str),
 }

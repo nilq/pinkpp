@@ -42,11 +42,12 @@ impl token {
         match *self {
             token::KeywordFn => token_type::Item,
 
-            token::KeywordLet | token::KeywordReturn | token::CloseBrace
+            token::KeywordLet | token::CloseBrace
                 => token_type::Statement,
 
-            token::KeywordTrue | token::KeywordFalse | token::KeywordIf |
-            token::Ident(_) | token::Integer {..} => token_type::Expression,
+            token::KeywordReturn | token::KeywordTrue | token::KeywordFalse |
+            token::KeywordIf | token::Ident(_) | token::Integer {..}
+                => token_type::Expression,
 
             token::Operand(_) => token_type::Operand,
 
@@ -471,6 +472,10 @@ pub enum parser_error {
         line: u32,
         compiler: (&'static str, u32),
     },
+    ExpectedSemicolon {
+        line: u32,
+        compiler: (&'static str, u32),
+    },
     InvalidSuffix {
         suffix: String,
         line: u32,
@@ -681,9 +686,11 @@ impl<'src> parser<'src> {
             token::KeywordTrue => Ok(Some(expr::BoolLiteral(true))),
             token::KeywordFalse => Ok(Some(expr::BoolLiteral(false))),
             token::KeywordReturn => {
-                let ret = try!(self.parse_expr(line!()));
-                try!(self.eat(token::Semicolon, line!()));
-                Ok(Some(expr::Return(Box::new(ret))))
+                if let Some(e) = try!(self.maybe_parse_expr()) {
+                    Ok(Some(expr::Return(Box::new(e))))
+                } else {
+                    Ok(Some(expr::Return(Box::new(expr::UnitLiteral))))
+                }
             },
             tok => {
                 self.unget_token(tok);
@@ -730,6 +737,37 @@ impl<'src> parser<'src> {
             Some(tok) => unreachable!("{:?}", tok),
             None => {
                 Ok(lhs)
+            }
+        }
+    }
+
+    fn parse_stmt(&mut self) -> Result<Option<stmt>, parser_error> {
+        match try!(self.maybe_parse_expr()) {
+            Some(e) => {
+                if let Some(_) = try!(self.maybe_eat(token::Semicolon, line!())) {
+                    Ok(Some(stmt::Stmt(e)))
+                } else {
+                    Ok(Some(stmt::Expr(e)))
+                }
+            }
+            None => {
+                match try!(self.eat_ty(token_type::Statement, line!())) {
+                    token::KeywordLet => {
+                        let name = try!(self.parse_ident(line!()));
+                        try!(self.eat(token::Colon, line!()));
+                        let ty = try!(self.parse_ty(line!()));
+                        try!(self.eat(token::Equals, line!()));
+                        let expr = try!(self.parse_expr(line!()));
+                        try!(self.eat(token::Semicolon, line!()));
+                        Ok(Some(stmt::Let {
+                            name: name,
+                            ty: ty,
+                            value: Box::new(expr),
+                        }))
+                    }
+                    token::CloseBrace => Ok(None),
+                    tok => unreachable!("{:?}", tok),
+                }
             }
         }
     }
@@ -802,31 +840,18 @@ impl<'src> parser<'src> {
         try!(self.eat(token::OpenBrace, line!()));
 
         let mut body = Vec::new();
-        loop {
-            match try!(self.eat_ty(token_type::Statement, line!())) {
-                token::KeywordReturn => {
-                    if let Some(e) = try!(self.maybe_parse_expr()) {
-                        body.push(stmt::Expr(expr::Return(Box::new(e))));
-                    } else {
-                        body.push(stmt::Expr(expr::Return(Box::new(expr::UnitLiteral))));
-                    }
-                    try!(self.eat(token::Semicolon, line!()));
+        let mut last = false;
+        while let Some(st) = try!(self.parse_stmt()) {
+            if last {
+                return Err(parser_error::ExpectedSemicolon {
+                    line: self.line(),
+                    compiler: fl!(),
+                })
+            } else {
+                if let stmt::Expr(_) = st {
+                    last = true;
                 }
-                token::KeywordLet => {
-                    let name = try!(self.parse_ident(line!()));
-                    try!(self.eat(token::Colon, line!()));
-                    let ty = try!(self.parse_ty(line!()));
-                    try!(self.eat(token::Equals, line!()));
-                    let expr = try!(self.parse_expr(line!()));
-                    body.push(stmt::Let {
-                        name: name,
-                        ty: ty,
-                        value: Box::new(expr),
-                    });
-                    try!(self.eat(token::Semicolon, line!()));
-                }
-                token::CloseBrace => break,
-                tok => unreachable!("{:?}", tok),
+                body.push(st);
             }
         }
 
