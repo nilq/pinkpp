@@ -11,7 +11,9 @@ pub enum ty {
     Bool,
     Unit,
     Diverging,
-    Generic,
+
+    Infer(u32),
+    InferInt(u32),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -35,7 +37,6 @@ impl ty {
         }
     }
 
-    // TODO(ubsan): we need to convert zero sized return types into void
     pub fn to_llvm(&self) -> LLVMTypeRef {
         unsafe {
             match *self {
@@ -43,7 +44,8 @@ impl ty {
                 ty::Bool => LLVMInt1Type(),
                 ty::Unit => LLVMStructType(std::ptr::null_mut(), 0, false as LLVMBool),
                 ty::Diverging => unreachable!("Diverging is not a real type"),
-                ty::Generic => unreachable!("Generic is not a real type"),
+                ty::Infer(_) | ty::InferInt(_) =>
+                    unreachable!("You can't get the llvm type of an inference variable"),
             }
         }
     }
@@ -55,8 +57,16 @@ impl ty {
                 ty::Bool => LLVMInt1Type(),
                 ty::Unit => LLVMVoidType(),
                 ty::Diverging => LLVMVoidType(),
-                ty::Generic => unreachable!("Generic is not a real type"),
+                ty::Infer(_) | ty::InferInt(_) =>
+                    unreachable!("You can't get the llvm type of an inference variable"),
             }
+        }
+    }
+
+    pub fn is_final_type(&self) -> bool {
+        match *self {
+            ty::SInt(_) | ty::UInt(_) | ty::Bool | ty::Unit => true,
+            ty::Diverging | ty::Infer(_) | ty::InferInt(_) => false,
         }
     }
 }
@@ -78,5 +88,67 @@ impl int {
             int::I32 => 32,
             // int::I64 => 64,
         }
+    }
+}
+
+pub struct union_find {
+    _hidden: (),
+}
+
+impl union_find {
+    pub fn new() -> union_find {
+        union_find {
+            _hidden: (),
+        }
+    }
+
+    pub fn unify(&mut self, a: &ty, b: &ty) -> Result<ty, ()> {
+        if a == b {
+            return Ok(a.clone());
+        }
+
+        if a.is_final_type() {
+            match *b {
+                ty::Diverging => {
+                    return Ok(a.clone()) // not sure about this
+                }
+                ty::Infer(_id) => {
+                    return Ok(a.clone())
+                }
+                ty::InferInt(_id) => {
+                    match *a {
+                        ty::SInt(_) | ty::UInt(_) => return Ok(a.clone()),
+                        _ => return Err(()),
+                    }
+                }
+                ref b if b.is_final_type() => {
+                    return Err(())
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        if b.is_final_type() {
+            match *a {
+                ty::Diverging => {
+                    return Ok(b.clone()) // not sure about this
+                }
+                ty::Infer(_id) => {
+                    return Ok(b.clone())
+                }
+                ty::InferInt(_id) => {
+                    match *b {
+                        ty::SInt(_) | ty::UInt(_) => return Ok(b.clone()),
+                        _ => return Err(()),
+                    }
+                }
+                ref a if a.is_final_type() => {
+                    return Err(())
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        Err(())
     }
 }
