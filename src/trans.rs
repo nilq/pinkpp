@@ -190,7 +190,7 @@ impl expr {
                     block.ret(ret);
                 }
                 match ty {
-                    ty::Infer(_) | ty::InferInt(_) => unimplemented!(),
+                    ty::Infer(_) | ty::InferInt(_) => panic!("ICE: inferrence variables after typeck"),
                     ty => value::undef(ty),
                 }
             }
@@ -323,7 +323,7 @@ impl expr {
                                 passed: args.len(),
                                 expected: f.input.len(),
                                 callee: callee.clone(),
-                                caller: "".to_owned(), // TODO(ubsan): fix this
+                                caller: function.name.clone(),
                             })
                         }
 
