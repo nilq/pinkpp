@@ -1,10 +1,10 @@
 [package]
-name = "pink"
+name = "pinkc"
 version = "0.1.0"
 authors = ["Nicholas Mazzuca <npmazzuca@gmail.com>"]
 
 [[bin]]
-name = "pink"
+name = "pinkc"
 path = "src/driver.rs"
 
 [dependencies]
