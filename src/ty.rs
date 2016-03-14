@@ -19,14 +19,23 @@ pub enum ty {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum int {
+    I8,
+    I16,
     I32,
+    I64,
 }
 
 impl ty {
     pub fn from_str(s: &str, line: u32) -> Result<ty, parser_error> {
         match s {
+            "s8" => Ok(ty::SInt(int::I8)),
+            "s16" => Ok(ty::SInt(int::I16)),
             "s32" => Ok(ty::SInt(int::I32)),
+            "s64" => Ok(ty::SInt(int::I64)),
+            "u8" => Ok(ty::UInt(int::I8)),
+            "u16" => Ok(ty::UInt(int::I16)),
             "u32" => Ok(ty::UInt(int::I32)),
+            "u64" => Ok(ty::UInt(int::I64)),
             "bool" => Ok(ty::Bool),
             "()" => Ok(ty::Unit),
             "!" => Ok(ty::Diverging),
@@ -41,12 +50,17 @@ impl ty {
     pub fn to_llvm(&self) -> LLVMTypeRef {
         unsafe {
             match *self {
-                ty::SInt(ref size) | ty::UInt(ref size) => LLVMIntType(size.size()),
+                ty::SInt(ref size) | ty::UInt(ref size)
+                    => LLVMIntType(size.size()),
                 ty::Bool => LLVMInt1Type(),
-                ty::Unit => LLVMStructType(std::ptr::null_mut(), 0, false as LLVMBool),
-                ty::Diverging => panic!("ICE: Attempted to get the LLVM type of Diverging"),
+                ty::Unit => LLVMStructType(std::ptr::null_mut(), 0,
+                        false as LLVMBool),
+                ty::Diverging
+                    => panic!("ICE: Attempted to get the LLVM type of \
+                        Diverging"),
                 ty::Infer(_) | ty::InferInt(_) =>
-                    panic!("ICE: Attempted to get the LLVM type of an inference variable"),
+                    panic!("ICE: Attempted to get the LLVM type of an \
+                        inference variable"),
             }
         }
     }
@@ -54,26 +68,30 @@ impl ty {
     pub fn to_llvm_ret(&self) -> LLVMTypeRef {
         unsafe {
             match *self {
-                ty::SInt(ref size) | ty::UInt(ref size) => LLVMIntType(size.size()),
+                ty::SInt(ref size) | ty::UInt(ref size) =>
+                    LLVMIntType(size.size()),
                 ty::Bool => LLVMInt1Type(),
                 ty::Unit => LLVMVoidType(),
                 ty::Diverging => LLVMVoidType(),
                 ty::Infer(_) | ty::InferInt(_) =>
-                    panic!("ICE: Attempted to get the LLVM return type of an inference variable"),
+                    panic!("ICE: Attempted to get the LLVM return type of an \
+                        inference variable"),
             }
         }
     }
 
     pub fn is_final_type(&self) -> bool {
         match *self {
-            ty::SInt(_) | ty::UInt(_) | ty::Bool | ty::Unit | ty::Diverging => true,
+            ty::SInt(_) | ty::UInt(_) | ty::Bool | ty::Unit | ty::Diverging
+                => true,
             ty::Infer(_) | ty::InferInt(_) => false,
         }
     }
 
     pub fn generate_inference_id(&mut self, uf: &mut union_find) {
         match *self {
-            ty::Infer(ref mut inner @ None) | ty::InferInt(ref mut inner @ None) => {
+            ty::Infer(ref mut inner @ None)
+            | ty::InferInt(ref mut inner @ None) => {
                 *inner = Some(uf.next_id());
             }
             _ => {}
@@ -84,19 +102,19 @@ impl ty {
 impl int {
     pub fn shift_mask(&self) -> u64 {
         match *self {
-            // int::I8 => (1 << 3) - 1,
-            // int::I16 => (1 << 4) - 1,
+            int::I8 => (1 << 3) - 1,
+            int::I16 => (1 << 4) - 1,
             int::I32 => (1 << 5) - 1,
-            // int::I64 => (1 << 6) - 1,
+            int::I64 => (1 << 6) - 1,
         }
     }
 
     pub fn size(&self) -> u32 {
         match *self {
-            // int::I8 => 8,
-            // int::I16 => 16,
+            int::I8 => 8,
+            int::I16 => 16,
             int::I32 => 32,
-            // int::I64 => 64,
+            int::I64 => 64,
         }
     }
 }
@@ -142,13 +160,14 @@ impl union_find {
             (None, None) => {
                 match (a, b) {
                     (ty::Infer(Some(lid)), ty::Infer(Some(rid)))
-                            | (ty::Infer(Some(lid)), ty::InferInt(Some(rid)))
-                            | (ty::InferInt(Some(lid)), ty::Infer(Some(rid)))
-                            | (ty::InferInt(Some(lid)), ty::InferInt(Some(rid))) => {
+                    | (ty::Infer(Some(lid)), ty::InferInt(Some(rid)))
+                    | (ty::InferInt(Some(lid)), ty::Infer(Some(rid)))
+                    | (ty::InferInt(Some(lid)), ty::InferInt(Some(rid))) => {
                         self.union(lid, rid);
                         Ok(())
                     }
-                    (l, r) => panic!("actual ty isn't working: {:?}, {:?}", l, r)
+                    (l, r)
+                        => panic!("actual ty isn't working: {:?}, {:?}", l, r)
                 }
             }
             (Some(ty), None) => {
@@ -165,7 +184,7 @@ impl union_find {
                                 self.parents_ty[id] = Some(ty);
                                 Ok(())
                             }
-                            _ty => {
+                            _ => {
                                 Err(())
                             }
                         }
@@ -187,7 +206,7 @@ impl union_find {
                                 self.parents_ty[id] = Some(ty);
                                 Ok(())
                             }
-                            _ty => {
+                            _ => {
                                 Err(())
                             }
                         }

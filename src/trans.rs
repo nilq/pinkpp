@@ -57,7 +57,8 @@ pub struct expr {
 
 impl expr {
     fn translate_out<'a>(self, out: Option<&lvalue>, function: &'a function,
-            locals: &mut HashMap<String, lvalue<'a>>, block: &mut block<'a>, ast: &ast) {
+            locals: &mut HashMap<String, lvalue<'a>>, block: &mut block<'a>,
+            ast: &ast) {
         assert!(self.ty.is_final_type(), "{:?}", self.ty);
         match self.kind {
             expr_kind::Binop {
@@ -68,7 +69,8 @@ impl expr {
                 expr {
                     kind: expr_kind::If {
                         condition: lhs,
-                        then_value: (vec![], Some(Box::new(expr::bool_lit(true)))),
+                        then_value:
+                            (vec![], Some(Box::new(expr::bool_lit(true)))),
                         else_value: (vec![], Some(rhs)),
                     },
                     ty: self.ty,
@@ -82,7 +84,8 @@ impl expr {
                 expr {
                     kind: expr_kind::If {
                         condition: Box::new(expr::not(*lhs, Some(ty::Bool))),
-                        then_value: (vec![], Some(Box::new(expr::bool_lit(false)))),
+                        then_value:
+                            (vec![], Some(Box::new(expr::bool_lit(false)))),
                         else_value: (vec![], Some(rhs)),
                     },
                     ty: self.ty,
@@ -95,7 +98,8 @@ impl expr {
             } => {
                 let cond = if condition.requires_out_ptr() {
                     let cond_ptr = lvalue::new(block, ty::Bool, None);
-                    condition.translate_out(Some(&cond_ptr), function, locals, block, ast);
+                    condition.translate_out(Some(&cond_ptr),
+                        function, locals, block, ast);
                     cond_ptr.read(block)
                 } else {
                     condition.translate_value(function, locals, block, ast)
@@ -106,15 +110,15 @@ impl expr {
                     let join_blk = block::new(function, "join");
                     block.conditional_branch(cond, &then_blk, &else_blk);
 
-                    let value = Self::translate_block(then_value, self.ty, function,
-                        locals, &mut then_blk, ast);
+                    let value = Self::translate_block(then_value, self.ty,
+                        function, locals, &mut then_blk, ast);
                     if let Some(ptr) = out {
                         ptr.write(value, &then_blk);
                     }
                     then_blk.branch(&join_blk);
 
-                    let value = Self::translate_block(else_value, self.ty, function,
-                        locals, &mut else_blk, ast);
+                    let value = Self::translate_block(else_value, self.ty,
+                        function, locals, &mut else_blk, ast);
                     if let Some(ptr) = out {
                         ptr.write(value, &else_blk);
                     }
@@ -133,12 +137,14 @@ impl expr {
     }
 
     fn translate_value<'a>(self, function: &'a function,
-            locals: &mut HashMap<String, lvalue<'a>>, block: &mut block<'a>, ast: &ast) -> value {
+            locals: &mut HashMap<String, lvalue<'a>>, block: &mut block<'a>,
+            ast: &ast) -> value {
         match self.kind {
             k @ expr_kind::Binop { op: operand::AndAnd, .. }
             | k @ expr_kind::Binop { op: operand::OrOr, .. }
             | k @ expr_kind::If { .. } => {
-                panic!("ICE: this expr should be passed to translate_out: {:?}", k)
+                panic!("ICE: this expr should be passed to \
+                    translate_out: {:?}", k)
             }
             expr_kind::IntLiteral(value) => {
                 value::int_literal(self.ty, value)
@@ -164,7 +170,8 @@ impl expr {
             } => {
                 let lhs = if lhs.requires_out_ptr() {
                     let lhs_ptr = lvalue::new(block, lhs.ty, None);
-                    lhs.translate_out(Some(&lhs_ptr), function, locals, block, ast);
+                    lhs.translate_out(Some(&lhs_ptr),
+                        function, locals, block, ast);
                     lhs_ptr.read(block)
                 } else {
                     lhs.translate_value(function, locals, block, ast)
@@ -172,7 +179,8 @@ impl expr {
 
                 let rhs = if rhs.requires_out_ptr() {
                     let rhs_ptr = lvalue::new(block, rhs.ty, None);
-                    rhs.translate_out(Some(&rhs_ptr), function, locals, block, ast);
+                    rhs.translate_out(Some(&rhs_ptr),
+                        function, locals, block, ast);
                     rhs_ptr.read(block)
                 } else {
                     rhs.translate_value(function, locals, block, ast)
@@ -183,7 +191,8 @@ impl expr {
             expr_kind::Plus(inner) => {
                 if inner.requires_out_ptr() {
                     let ptr = lvalue::new(block, inner.ty, None);
-                    inner.translate_out(Some(&ptr), function, locals, block, ast);
+                    inner.translate_out(Some(&ptr),
+                        function, locals, block, ast);
                     ptr.read(block)
                 } else {
                     inner.translate_value(function, locals, block, ast)
@@ -192,19 +201,23 @@ impl expr {
             expr_kind::Minus(inner) => {
                 if inner.requires_out_ptr() {
                     let ptr = lvalue::new(block, inner.ty, None);
-                    inner.translate_out(Some(&ptr), function, locals, block, ast);
+                    inner.translate_out(Some(&ptr),
+                        function, locals, block, ast);
                     ptr.read(block).neg(block)
                 } else {
-                    inner.translate_value(function, locals, block, ast).neg(block)
+                    inner.translate_value(function, locals, block, ast)
+                        .neg(block)
                 }
             }
             expr_kind::Not(inner) => {
                 if inner.requires_out_ptr() {
                     let ptr = lvalue::new(block, inner.ty, None);
-                    inner.translate_out(Some(&ptr), function, locals, block, ast);
+                    inner.translate_out(Some(&ptr),
+                        function, locals, block, ast);
                     ptr.read(block).not(block)
                 } else {
-                    inner.translate_value(function, locals, block, ast).not(block)
+                    inner.translate_value(function, locals, block, ast)
+                        .not(block)
                 }
             }
             expr_kind::Call {
@@ -216,7 +229,8 @@ impl expr {
                     llvm_args.push(
                     if arg.requires_out_ptr() {
                         let ptr = lvalue::new(block, arg.ty, None);
-                        arg.translate_out(Some(&ptr), function, locals, block, ast);
+                        arg.translate_out(Some(&ptr),
+                            function, locals, block, ast);
                         ptr.read(block)
                     } else {
                         arg.translate_value(function, locals, block, ast)
@@ -227,7 +241,8 @@ impl expr {
             expr_kind::Return(expr) => {
                 let ret = if expr.requires_out_ptr() {
                     let ret_ptr = lvalue::new(block, expr.ty, Some("ret"));
-                    expr.translate_out(Some(&ret_ptr), function, locals, block, ast);
+                    expr.translate_out(Some(&ret_ptr),
+                        function, locals, block, ast);
                     ret_ptr.read(block)
                 } else {
                     expr.translate_value(function, locals, block, ast)
@@ -241,8 +256,8 @@ impl expr {
     }
 
     fn translate_block<'a>(body: (Vec<stmt>, Option<Box<expr>>), blk_ty: ty,
-            function: &'a function, locals: &mut HashMap<String, lvalue<'a>>, block: &mut block<'a>,
-            ast: &ast) -> value {
+            function: &'a function, locals: &mut HashMap<String, lvalue<'a>>,
+            block: &mut block<'a>, ast: &ast) -> value {
         let locals_at_start = locals.clone();
         for st in body.0 {
             match st {
@@ -252,7 +267,8 @@ impl expr {
                     value,
                 } => {
                     let local = lvalue::new(block, ty, Some(&name));
-                    value.translate_out(Some(&local), function, locals, block, ast);
+                    value.translate_out(Some(&local),
+                        function, locals, block, ast);
                     locals.insert(name, local);
                 }
                 stmt::Expr(e) => {
@@ -268,7 +284,8 @@ impl expr {
             if let Some(e) = body.1 {
                 let ret = if e.requires_out_ptr() {
                     let ret_ptr = lvalue::new(&block, blk_ty, Some("ret"));
-                    e.translate_out(Some(&ret_ptr), function, locals, block, ast);
+                    e.translate_out(Some(&ret_ptr),
+                        function, locals, block, ast);
                     ret_ptr.read(&block)
                 } else {
                     e.translate_value(function, locals, block, ast)
@@ -295,10 +312,10 @@ impl expr {
         }
     }
 
-    fn typeck_block(block: (&mut Vec<stmt>, &mut Option<Box<expr>>), to_unify: ty,
-            uf: &mut union_find, variables: &mut HashMap<String, ty>,
-            function: &function, functions: &HashMap<String, function>)
-            -> Result<(), ast_error> {
+    fn typeck_block(block: (&mut Vec<stmt>, &mut Option<Box<expr>>),
+            to_unify: ty, uf: &mut union_find,
+            variables: &mut HashMap<String, ty>, function: &function,
+            functions: &HashMap<String, function>) -> Result<(), ast_error> {
         let mut live_blk = true;
         for stmt in block.0.iter_mut() {
             match *stmt {
@@ -308,14 +325,16 @@ impl expr {
                     ref mut value,
                 } => {
                     ty.generate_inference_id(uf);
-                    try!(value.unify_type(*ty, uf, variables, function, functions));
+                    try!(value.unify_type(
+                        *ty, uf, variables, function, functions));
                     variables.insert(name.to_owned(), *ty);
                 }
                 stmt::Expr(ref mut e @ expr {
                     kind: expr_kind::Return(_),
                     ..
                 }) => {
-                    try!(e.unify_type(ty::Diverging, uf, variables, function, functions));
+                    try!(e.unify_type(ty::Diverging,
+                        uf, variables, function, functions));
                     live_blk = false;
                     break;
                 }
@@ -329,7 +348,8 @@ impl expr {
         if live_blk {
             match *block.1 {
                 Some(ref mut expr) => {
-                    try!(expr.unify_type(to_unify, uf, variables, function, functions));
+                    try!(expr.unify_type(to_unify,
+                        uf, variables, function, functions));
                 },
                 None => {
                     if to_unify != ty::Unit {
@@ -346,8 +366,9 @@ impl expr {
         Ok(())
     }
 
-    fn finalize_block_ty(block: (&mut Vec<stmt>, &mut Option<Box<expr>>), uf: &mut union_find,
-            function: &function) -> Result<(), ast_error> {
+    fn finalize_block_ty(block: (&mut Vec<stmt>, &mut Option<Box<expr>>),
+            uf: &mut union_find, function: &function)
+            -> Result<(), ast_error> {
         let mut live_blk = true;
 
         for stmt in block.0.iter_mut() {
@@ -397,11 +418,13 @@ impl expr {
         Ok(())
     }
 
-    fn unify_type(&mut self, to_unify: ty, uf: &mut union_find, variables: &mut HashMap<String, ty>,
-            function: &function, functions: &HashMap<String, function>) -> Result<(), ast_error> {
+    fn unify_type(&mut self, to_unify: ty, uf: &mut union_find,
+            variables: &mut HashMap<String, ty>, function: &function,
+            functions: &HashMap<String, function>) -> Result<(), ast_error> {
         self.ty.generate_inference_id(uf);
         match self.kind {
-            expr_kind::IntLiteral(_) | expr_kind::BoolLiteral(_) | expr_kind::UnitLiteral => {
+            expr_kind::IntLiteral(_) | expr_kind::BoolLiteral(_)
+            | expr_kind::UnitLiteral => {
                 uf.unify(self.ty, to_unify).map_err(|()|
                     ast_error::CouldNotUnify {
                         first: self.ty,
@@ -441,7 +464,8 @@ impl expr {
             }
             expr_kind::Plus(ref mut inner) | expr_kind::Minus(ref mut inner)
             | expr_kind::Not(ref mut inner) => {
-                try!(inner.unify_type(to_unify, uf, variables, function, functions));
+                try!(inner.unify_type(to_unify,
+                    uf, variables, function, functions));
                 let ty = self.ty;
                 uf.unify(self.ty, inner.ty).map_err(|()|
                     ast_error::CouldNotUnify {
@@ -459,11 +483,13 @@ impl expr {
             } => {
                 match op {
                     operand::Mul | operand::Div | operand::Rem | operand::Plus
-                    | operand::Minus | operand::Shl | operand::Shr | operand::And
-                    | operand::Xor | operand::Or => {
+                    | operand::Minus | operand::Shl | operand::Shr
+                    | operand::And | operand::Xor | operand::Or => {
                         let ty = self.ty;
-                        try!(lhs.unify_type(self.ty, uf, variables, function, functions));
-                        try!(rhs.unify_type(lhs.ty, uf, variables, function, functions));
+                        try!(lhs.unify_type(self.ty,
+                            uf, variables, function, functions));
+                        try!(rhs.unify_type(lhs.ty,
+                            uf, variables, function, functions));
                         uf.unify(self.ty, to_unify).map_err(|()|
                             ast_error::CouldNotUnify {
                                 first: ty,
@@ -474,13 +500,15 @@ impl expr {
                         )
                     }
 
-                    operand::EqualsEquals | operand::NotEquals | operand::LessThan
-                    | operand::LessThanEquals | operand::GreaterThan
-                    | operand::GreaterThanEquals => {
+                    operand::EqualsEquals | operand::NotEquals
+                    | operand::LessThan | operand::LessThanEquals
+                    | operand::GreaterThan | operand::GreaterThanEquals => {
                         self.ty = ty::Bool;
                         rhs.ty.generate_inference_id(uf);
-                        try!(lhs.unify_type(rhs.ty, uf, variables, function, functions));
-                        try!(rhs.unify_type(lhs.ty, uf, variables, function, functions));
+                        try!(lhs.unify_type(rhs.ty,
+                            uf, variables, function, functions));
+                        try!(rhs.unify_type(lhs.ty,
+                            uf, variables, function, functions));
                         uf.unify(self.ty, to_unify).map_err(|()|
                             ast_error::CouldNotUnify {
                                 first: ty::Bool,
@@ -493,8 +521,10 @@ impl expr {
 
                     operand::AndAnd | operand::OrOr => {
                         self.ty = ty::Bool;
-                        try!(lhs.unify_type(ty::Bool, uf, variables, function, functions));
-                        try!(rhs.unify_type(ty::Bool, uf, variables, function, functions));
+                        try!(lhs.unify_type(ty::Bool,
+                            uf, variables, function, functions));
+                        try!(rhs.unify_type(ty::Bool,
+                            uf, variables, function, functions));
 
                         uf.unify(self.ty, to_unify).map_err(|()|
                             ast_error::CouldNotUnify {
@@ -527,7 +557,8 @@ impl expr {
                         }
 
                         for (arg_ty, expr) in f.input.iter().zip(args) {
-                           try!(expr.unify_type(*arg_ty, uf, variables, function, functions));
+                            try!(expr.unify_type(*arg_ty,
+                                uf, variables, function, functions));
                         }
                         self.ty = f.output;
                         let ty = self.ty;
@@ -540,7 +571,8 @@ impl expr {
                             }
                         )
                     }
-                    None => return Err(ast_error::FunctionDoesntExist(callee.clone()))
+                    None => return Err(
+                        ast_error::FunctionDoesntExist(callee.clone()))
                 }
             }
             expr_kind::If {
@@ -548,11 +580,12 @@ impl expr {
                 ref mut then_value,
                 ref mut else_value,
             } => {
-                try!(condition.unify_type(ty::Bool, uf, variables, function, functions));
-                try!(Self::typeck_block((&mut then_value.0, &mut then_value.1), to_unify,
+                try!(condition.unify_type(ty::Bool,
                     uf, variables, function, functions));
-                try!(Self::typeck_block((&mut else_value.0, &mut else_value.1), to_unify,
-                    uf, variables, function, functions));
+                try!(Self::typeck_block((&mut then_value.0, &mut then_value.1),
+                    to_unify, uf, variables, function, functions));
+                try!(Self::typeck_block((&mut else_value.0, &mut else_value.1),
+                    to_unify, uf, variables, function, functions));
                 let ty = self.ty;
                 uf.unify(self.ty, to_unify).map_err(|()|
                     ast_error::CouldNotUnify {
@@ -565,15 +598,17 @@ impl expr {
             }
             expr_kind::Return(ref mut ret) => {
                 self.ty = ty::Diverging;
-                ret.unify_type(function.output, uf, variables, function, functions)
+                ret.unify_type(function.output,
+                    uf, variables, function, functions)
             }
         }
     }
 
-    fn finalize_type(&mut self, uf: &mut union_find, function: &function) -> Result<(), ast_error> {
+    fn finalize_type(&mut self, uf: &mut union_find, function: &function)
+            -> Result<(), ast_error> {
         match self.kind {
-            expr_kind::IntLiteral(_) | expr_kind::BoolLiteral(_) | expr_kind::UnitLiteral |
-                expr_kind::Variable(_) => {
+            expr_kind::IntLiteral(_) | expr_kind::BoolLiteral(_)
+            | expr_kind::UnitLiteral | expr_kind::Variable(_) => {
                 self.ty = match uf.actual_ty(self.ty) {
                     Some(t) => t,
                     None => return Err(ast_error::NoActualType {
@@ -693,14 +728,20 @@ impl expr {
                     })
                 };
                 try!(condition.finalize_type(uf, function));
-                try!(Self::finalize_block_ty((&mut then_value.0, &mut then_value.1), uf, function));
-                Self::finalize_block_ty((&mut else_value.0, &mut else_value.1), uf, function)
+                try!(Self::finalize_block_ty(
+                    (&mut then_value.0, &mut then_value.1), uf, function));
+                Self::finalize_block_ty(
+                    (&mut else_value.0, &mut else_value.1), uf, function)
             }
             expr_kind::Return(ref mut ret) => {
                 self.ty = match uf.actual_ty(self.ty) {
                     Some(t @ ty::Diverging) => t,
-                    Some(t) => panic!("ICE: return without Diverging type: {:#?}", t),
-                    None => panic!("ICE: return with no type (should be Diverging)")
+                    Some(t) =>
+                        panic!("ICE: return is typed {:#?}; should be {:?}",
+                            t, ty::Diverging),
+                    None =>
+                        panic!("ICE: return with no type (should be {:?})",
+                            ty::Diverging)
                 };
                 ret.finalize_type(uf, function)
             }
@@ -712,8 +753,8 @@ impl expr {
             expr_kind::If {..} => true,
             expr_kind::Call {..} | expr_kind::Binop {..} | expr_kind::Plus(_)
             | expr_kind::Minus(_) | expr_kind::Not(_) | expr_kind::Variable(_)
-            | expr_kind::IntLiteral(_) | expr_kind::BoolLiteral(_) | expr_kind::UnitLiteral
-            | expr_kind::Return(_) => false,
+            | expr_kind::IntLiteral(_) | expr_kind::BoolLiteral(_)
+            | expr_kind::UnitLiteral | expr_kind::Return(_) => false,
         }
     }
 
@@ -817,21 +858,24 @@ struct function {
 }
 
 impl function {
-    fn new(name: String, ret_ty: ty, args: Vec<(String, ty)>, module: &mut module)
-            -> Result<function, parser_error> {
+    fn new(name: String, ret_ty: ty, args: Vec<(String, ty)>,
+            module: &mut module) -> Result<function, parser_error> {
         let mut args_ty = Vec::new();
         let mut args_hashmap = HashMap::new();
         let mut arg_index = 0;
 
         let raw = unsafe {
-            let params_ty = args.iter().map(|&(_, ref t)| t.to_llvm()).collect::<Vec<_>>();
+            let params_ty = args.iter().map(
+                |&(_, ref t)| t.to_llvm()).collect::<Vec<_>>();
             module.add_func(&name, &ret_ty, &params_ty)
         };
 
         for (arg_name, arg_ty) in args {
             if !args_hashmap.contains_key(&arg_name) {
                 args_ty.push(arg_ty.clone());
-                debug_assert!(args_hashmap.insert(arg_name, (arg_index, arg_ty)).is_none());
+                debug_assert!(
+                    args_hashmap.insert(arg_name, (arg_index, arg_ty))
+                    .is_none());
                 arg_index += 1;
             } else {
                 return Err(parser_error::DuplicatedFunctionArgument {
@@ -855,14 +899,16 @@ impl function {
         let mut block = block::new(self, "entry");
         let mut locals = HashMap::new();
 
-        let ret = expr::translate_block(body, self.output.clone(), self, &mut locals, &mut block, ast);
+        let ret = expr::translate_block(body, self.output.clone(),
+            self, &mut locals, &mut block, ast);
 
         if block.is_live() {
             if self.output == ret.ty {
                 block.ret(ret)
             } else {
                 block.terminate();
-                panic!("ICE: typeck passed through non-void void function: {}", self.name)
+                panic!("ICE: typeck passed through non-void void function: {}",
+                    self.name)
             }
         }
 
@@ -937,8 +983,9 @@ impl ast {
                     args,
                     body,
                 }) => {
-                    if let Some(_) = functions.insert(name.clone(),
-                            try!(function::new(name.clone(), ret, args, &mut module))) {
+                    let f = try!(function::new(name.clone(),
+                        ret, args, &mut module));
+                    if let Some(_) = functions.insert(name.clone(), f) {
                         return Err(parser_error::DuplicatedFunction {
                             function: name,
                             compiler: fl!(),
@@ -965,11 +1012,15 @@ impl ast {
             let mut vars = HashMap::<String, ty>::new();
             let function = match self.functions.get(name) {
                 Some(f) => f,
-                None => panic!("ICE: block without an associated function: {}", name),
+                None =>
+                    panic!("ICE: block without an associated function: {}",
+                        name),
             };
-            try!(expr::typeck_block((&mut block.0, &mut block.1), function.output.clone(),
+            try!(expr::typeck_block((&mut block.0, &mut block.1),
+                function.output.clone(),
                 &mut uf, &mut vars, function, &self.functions));
-            try!(expr::finalize_block_ty((&mut block.0, &mut block.1), &mut uf, function));
+            try!(expr::finalize_block_ty((&mut block.0, &mut block.1),
+                &mut uf, function));
         }
         Ok(())
     }
@@ -980,7 +1031,9 @@ impl ast {
         for (name, func) in self.functions.iter() {
             match self.function_blocks.remove(name) {
                 Some(body) => func.add_body(body, &self),
-                None => panic!("ICE: function without an associated block: {}", name),
+                None =>
+                    panic!("ICE: function without an associated block: {}",
+                        name),
             }
         }
 
@@ -989,14 +1042,16 @@ impl ast {
             LLVMDumpModule(self.module.raw);
 
             println!("--- RUNNING ---");
-            LLVMVerifyModule(self.module.raw, LLVMAbortProcessAction, &mut error);
+            LLVMVerifyModule(self.module.raw, LLVMAbortProcessAction,
+                &mut error);
             LLVMDisposeMessage(error);
 
             if let Some(main) = self.functions.get("main") {
                 if let ty::Infer(_) = main.output {
                     unreachable!("Infer(_) should not have got past typeck.")
                 } else if let ty::InferInt(_) = main.output {
-                    unreachable!("InferInt(_) should not have got past typeck.")
+                    unreachable!(
+                        "InferInt(_) should not have got past typeck.")
                 }
                 if main.input.len() != 0 {
                     return Err(ast_error::IncorrectNumberOfArguments {
@@ -1006,30 +1061,36 @@ impl ast {
                         caller: "[program]".to_owned(),
                     });
                 }
-                let mut engine: LLVMExecutionEngineRef = std::mem::uninitialized();
+                let mut engine: LLVMExecutionEngineRef =
+                    std::mem::uninitialized();
                 error = std::ptr::null_mut();
                 LLVMLinkInMCJIT();
                 LLVM_InitializeNativeTarget();
                 LLVM_InitializeNativeAsmPrinter();
                 if LLVMCreateJITCompilerForModule(&mut engine, self.module.raw,
                         0, &mut error) != 0 {
-                    writeln!(std::io::stderr(), "failed to create execution engine: {:?}",
+                    writeln!(std::io::stderr(),
+                        "failed to create execution engine: {:?}",
                         CStr::from_ptr(error)).unwrap();
                     LLVMDisposeMessage(error);
                     std::process::exit(-1);
                 }
 
-                let res = LLVMRunFunction(engine, main.raw, 0, std::ptr::null_mut());
+                let res = LLVMRunFunction(engine, main.raw,
+                    0, std::ptr::null_mut());
                 match main.output {
                     ty::SInt(int::I32) => {
-                        println!("{}", LLVMGenericValueToInt(res, true as LLVMBool) as i32);
+                        let val = LLVMGenericValueToInt(res, true as LLVMBool);
+                        println!("{}", val as i32);
                     }
                     ty::UInt(int::I32) => {
-                        println!("{}", LLVMGenericValueToInt(res, true as LLVMBool) as u32);
+                        let val = LLVMGenericValueToInt(res, true as LLVMBool);
+                        println!("{}", val as u32);
                     }
                     ty::Unit => {}
                     ref ty => {
-                        println!("Pink does not yet support printing the {:?} return type", ty);
+                        println!("Pink does not yet support printing the \
+                            {:?} return type", ty);
                     }
                 }
 
@@ -1048,7 +1109,8 @@ impl ast {
         match self.functions.get(callee) {
             Some(f) => {
                 value {
-                    raw: block.build_call(f, args.into_iter().map(|arg| arg.raw).collect()),
+                    raw: block.build_call(f,
+                            args.into_iter().map(|arg| arg.raw).collect()),
                     ty: f.output.clone(),
                 }
             },
@@ -1096,9 +1158,10 @@ impl module {
         }
     }
 
-    unsafe fn add_func(&self, name: &str, ret_ty: &ty, args: &[LLVMTypeRef]) -> LLVMValueRef {
-        let ty = LLVMFunctionType(ret_ty.to_llvm_ret(), args.as_ptr() as *mut _,
-            args.len() as u32, false as LLVMBool);
+    unsafe fn add_func(&self, name: &str, ret_ty: &ty, args: &[LLVMTypeRef])
+            -> LLVMValueRef {
+        let ty = LLVMFunctionType(ret_ty.to_llvm_ret(),
+            args.as_ptr() as *mut _, args.len() as u32, false as LLVMBool);
         LLVMAddFunction(self.raw, CString::new(name.to_owned())
             .expect("name should not have a nul in it").as_ptr(), ty)
     }
@@ -1124,7 +1187,9 @@ impl value {
                 let llvm_ty = ty.to_llvm();
                 value {
                     ty: ty,
-                    raw: unsafe { LLVMConstInt(llvm_ty, val, false as LLVMBool) },
+                    raw: unsafe {
+                        LLVMConstInt(llvm_ty, val, false as LLVMBool)
+                    },
                 }
             }
             ty => {
@@ -1139,7 +1204,9 @@ impl value {
                 let llvm_ty = t.to_llvm();
                 value {
                     ty: t,
-                    raw: unsafe { LLVMConstInt(llvm_ty, val as u64, false as LLVMBool) },
+                    raw: unsafe {
+                        LLVMConstInt(llvm_ty, val as u64, false as LLVMBool)
+                    },
                 }
             }
             ty => {
@@ -1152,7 +1219,9 @@ impl value {
         match ty {
             ty::Unit => {
                 value {
-                    raw: unsafe { LLVMConstStruct([].as_mut_ptr(), 0, false as LLVMBool) },
+                    raw: unsafe {
+                        LLVMConstStruct([].as_mut_ptr(), 0, false as LLVMBool)
+                    },
                     ty: ty::Unit,
                 }
             }
@@ -1289,7 +1358,10 @@ impl value {
                     ty::SInt(ref lt) | ty::UInt(ref lt) => {
                         let shift_mask = lt.shift_mask();
                         let safe_rhs = block.build_and(rhs.raw,
-                            unsafe {LLVMConstInt(rhs.ty.to_llvm(), shift_mask, false as LLVMBool)});
+                            unsafe {
+                                LLVMConstInt(rhs.ty.to_llvm(),
+                                    shift_mask, false as LLVMBool)
+                            });
                         return value {
                             raw: block.build_shl(self.raw, safe_rhs),
                             ty: self.ty.clone(),
@@ -1309,7 +1381,10 @@ impl value {
                     ty::SInt(ref lt) => {
                         let shift_mask = lt.shift_mask();
                         let safe_rhs = block.build_and(rhs.raw,
-                            unsafe {LLVMConstInt(rhs.ty.to_llvm(), shift_mask, false as LLVMBool)});
+                            unsafe {
+                                LLVMConstInt(rhs.ty.to_llvm(),
+                                    shift_mask, false as LLVMBool)
+                            });
                         return value {
                             raw: block.build_ashr(self.raw, safe_rhs),
                             ty: self.ty.clone(),
@@ -1318,7 +1393,10 @@ impl value {
                     ty::UInt(ref lt) => {
                         let shift_mask = lt.shift_mask();
                         let safe_rhs = block.build_and(rhs.raw,
-                            unsafe {LLVMConstInt(rhs.ty.to_llvm(), shift_mask, false as LLVMBool)});
+                            unsafe {
+                                LLVMConstInt(rhs.ty.to_llvm(),
+                                    shift_mask, false as LLVMBool)
+                            });
                         return value {
                             raw: block.build_lshr(self.raw, safe_rhs),
                             ty: self.ty.clone(),
@@ -1497,7 +1575,8 @@ struct lvalue<'a> {
 
 impl<'a> lvalue<'a> {
     fn new(block: &block<'a>, ty: ty, name: Option<&str>) -> lvalue<'a> {
-        let name = CString::new(name.unwrap_or("").to_owned()).expect("Null in a variable name");
+        let name = CString::new(name.unwrap_or("").to_owned())
+            .expect("Null in a variable name");
         lvalue {
             raw: block.build_alloca(ty.to_llvm(), name.as_ptr()),
             ty: ty,
@@ -1538,7 +1617,9 @@ impl<'a> block<'a> {
                 raw: raw,
                 builder: builder,
                 live: true,
-                dbg_name: format!("function: {}, block: {}", function.name, name),
+                dbg_name:
+                    format!("function: {}, block: {}",
+                        function.name, name),
                 function: std::marker::PhantomData,
             }
         }
@@ -1575,7 +1656,8 @@ impl<'a> block<'a> {
     }
 
     /// terminator
-    fn conditional_branch(&mut self, cond: value, then_blk: &block, else_blk: &block) {
+    fn conditional_branch(&mut self, cond: value, then_blk: &block,
+            else_blk: &block) {
         if self.live {
             self.live = false;
             unsafe {
@@ -1595,12 +1677,14 @@ impl<'a> block<'a> {
         }
     }
 
-    fn build_call(&self, func: &function, mut args: Vec<LLVMValueRef>) -> LLVMValueRef {
+    fn build_call(&self, func: &function, mut args: Vec<LLVMValueRef>)
+            -> LLVMValueRef {
         assert!(func.args.len() == args.len());
         match self.builder() {
             Some(builder) => {
                 unsafe {
-                    LLVMBuildCall(builder, func.raw, args.as_mut_ptr(), args.len() as u32, cstr!(""))
+                    LLVMBuildCall(builder, func.raw, args.as_mut_ptr(),
+                        args.len() as u32, cstr!(""))
                 }
             }
             None => Self::none_value()
@@ -1609,118 +1693,162 @@ impl<'a> block<'a> {
 
     fn build_mul(&self, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildMul(builder, lhs, rhs, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildMul(builder, lhs, rhs, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
 
-    fn build_sdiv(&self, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
+    fn build_sdiv(&self, lhs: LLVMValueRef, rhs: LLVMValueRef)
+            -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildSDiv(builder, lhs, rhs, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildSDiv(builder, lhs, rhs, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
-    fn build_udiv(&self, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
+    fn build_udiv(&self, lhs: LLVMValueRef, rhs: LLVMValueRef)
+            -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildUDiv(builder, lhs, rhs, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildUDiv(builder, lhs, rhs, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
-    fn build_srem(&self, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
+    fn build_srem(&self, lhs: LLVMValueRef, rhs: LLVMValueRef)
+            -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildSRem(builder, lhs, rhs, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildSRem(builder, lhs, rhs, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
-    fn build_urem(&self, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
+    fn build_urem(&self, lhs: LLVMValueRef, rhs: LLVMValueRef)
+            -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildSRem(builder, lhs, rhs, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildSRem(builder, lhs, rhs, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
     fn build_add(&self, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildAdd(builder, lhs, rhs, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildAdd(builder, lhs, rhs, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
     fn build_sub(&self, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildSub(builder, lhs, rhs, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildSub(builder, lhs, rhs, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
     fn build_shl(&self, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildShl(builder, lhs, rhs, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildShl(builder, lhs, rhs, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
-    fn build_ashr(&self, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
+    fn build_ashr(&self, lhs: LLVMValueRef, rhs: LLVMValueRef)
+            -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildAShr(builder, lhs, rhs, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildAShr(builder, lhs, rhs, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
-    fn build_lshr(&self, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
+    fn build_lshr(&self, lhs: LLVMValueRef, rhs: LLVMValueRef)
+            -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildLShr(builder, lhs, rhs, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildLShr(builder, lhs, rhs, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
     fn build_and(&self, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildAnd(builder, lhs, rhs, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildAnd(builder, lhs, rhs, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
     fn build_xor(&self, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildXor(builder, lhs, rhs, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildXor(builder, lhs, rhs, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
     fn build_or(&self, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildOr(builder, lhs, rhs, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildOr(builder, lhs, rhs, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
-    fn build_cmp(&self, cmp: LLVMIntPredicate, lhs: LLVMValueRef, rhs: LLVMValueRef) -> LLVMValueRef {
+    fn build_cmp(&self, cmp: LLVMIntPredicate, lhs: LLVMValueRef,
+            rhs: LLVMValueRef) -> LLVMValueRef {
         match self.builder() {
-            Some(builder) =>
-                unsafe { LLVMBuildICmp(builder, cmp, lhs, rhs, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildICmp(builder, cmp, lhs, rhs, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
     fn build_neg(&self, inner: LLVMValueRef) -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildNeg(builder, inner, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildNeg(builder, inner, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
     fn build_not(&self, inner: LLVMValueRef) -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildNot(builder, inner, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildNot(builder, inner, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
 
     fn build_alloca(&self, ty: LLVMTypeRef, name: *const i8) -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildAlloca(builder, ty, name) },
+            Some(builder) => unsafe {
+                LLVMBuildAlloca(builder, ty, name)
+            },
             None => Self::none_value()
         }
     }
     fn build_store(&self, value: LLVMValueRef, ptr: LLVMValueRef) {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildStore(builder, value, ptr); },
+            Some(builder) => unsafe {
+                LLVMBuildStore(builder, value, ptr);
+            },
             None => {}
         }
     }
     fn build_load(&self, ptr: LLVMValueRef) -> LLVMValueRef {
         match self.builder() {
-            Some(builder) => unsafe { LLVMBuildLoad(builder, ptr, cstr!("")) },
+            Some(builder) => unsafe {
+                LLVMBuildLoad(builder, ptr, cstr!(""))
+            },
             None => Self::none_value()
         }
     }
