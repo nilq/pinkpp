@@ -302,9 +302,10 @@ impl Value {
         Value::leaf(ValueLeaf::Variable(Variable(arg_num)))
     }
 
-    pub fn local(var: Variable, function: &mut Function) -> Value {
+    pub fn local(var: Variable) -> Value {
         Value::leaf(ValueLeaf::Variable(var))
     }
+
 
     #[inline(always)]
     fn leaf(leaf: ValueLeaf) -> Value {

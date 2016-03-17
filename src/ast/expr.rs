@@ -671,7 +671,7 @@ impl Expr {
             }
             ExprKind::Variable(name) => {
                 if let Some(var) = locals.get(&name) {
-                    mir::Value::local(*var, &mut function.raw)
+                    mir::Value::local(*var)
                 } else if let Some(&(num, _)) = function.args.get(&name) {
                     mir::Value::param(num as u32, &mut function.raw)
                 } else {

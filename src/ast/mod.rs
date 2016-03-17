@@ -169,7 +169,7 @@ impl Function {
         let mut block = self.raw.start_block();
         // let mut locals = HashMap::new();
 
-        let mut locals = Vec::new();
+        let mut locals = HashMap::new();
         let ret = Expr::translate_block(body, &mut self, &mut block,
                 &mut locals, &ast.function_types);
         block.finish(&mut self.raw, ret);
