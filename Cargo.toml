@@ -9,3 +9,5 @@ path = "src/driver.rs"
 
 [dependencies]
 llvm-sys = "0.2.1"
+argparse = "0.2.1"
+libc = "0.2.7"
