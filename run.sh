@@ -1,2 +1,2 @@
 #! /bin/sh
-cargo run -- src/test.pnk
+cargo run -- src/test.pnk $@
