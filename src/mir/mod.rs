@@ -1,15 +1,16 @@
 use std;
 use std::collections::HashMap;
-use std::ffi::{CStr, CString};
-use llvm_sys::prelude::*;
-use llvm_sys::core::*;
 use ty::{self, Type, TypeVariant, TypeContext};
+use self::codegen::Generator;
+
+mod codegen;
 
 const START_BLOCK: Block = Block(0);
 const END_BLOCK: Block = Block(1);
 
 #[derive(Debug)]
 pub struct Function<'t> {
+    name: String,
     ty: ty::Function<'t>,
     temporaries: Vec<Type<'t>>,
     locals: Vec<Type<'t>>,
@@ -23,8 +24,9 @@ struct Temporary(u32);
 struct Parameter(u32);
 
 impl<'t> Function<'t> {
-    pub fn new(ty: ty::Function<'t>) -> Self {
+    pub fn new(name: String, ty: ty::Function<'t>) -> Self {
         let mut ret = Function {
+            name: name,
             ty: ty,
             temporaries: Vec::new(),
             locals: Vec::new(),
@@ -47,6 +49,11 @@ impl<'t> Function<'t> {
         }
         END_BLOCK.terminate(&mut ret, Terminator::Return);
         ret
+    }
+
+    #[inline(always)]
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     pub fn start_block(&self) -> Block {
@@ -96,13 +103,29 @@ impl<'t> Function<'t> {
         }
     }
 
+    fn to_asm(mut self, name: &str, codegen: &mut Generator) {
+        codegen.start_function(name);
+        assert!(self.temporaries.len() == 0);
+        assert!(self.locals.len() == 0);
+        let blocks = std::mem::replace(&mut self.blocks, Vec::new());
+        for (i, block) in blocks.into_iter().enumerate() {
+            block.to_asm(&self, Block(i), codegen);
+        }
+    }
+
+    fn get_block_name(&self, blk: &Block) -> String {
+        format!("{}$bb{}", self.name, blk.0)
+    }
+    /*
     fn build(self, llfunc: LLVMValueRef,
              funcs: &HashMap<String, (LLVMValueRef, Type<'t>)>,
              ctxt: &'t TypeContext<'t>) {
         LlFunction::build(self, llfunc, funcs, ctxt)
     }
+    */
 }
 
+/*
 struct LlFunction<'t> {
     mir: Function<'t>,
     raw: LLVMValueRef,
@@ -187,6 +210,7 @@ impl<'t> LlFunction<'t> {
         self.blocks[blk.0]
     }
 }
+*/
 
 #[derive(Copy, Clone, Debug)]
 enum Const<'t> {
@@ -199,6 +223,7 @@ enum Const<'t> {
 }
 
 impl<'t> Const<'t> {
+    /*
     unsafe fn to_llvm(self, ctxt: &'t TypeContext<'t>) -> LLVMValueRef {
         match self {
             Const::Int {
@@ -216,6 +241,7 @@ impl<'t> Const<'t> {
             }
         }
     }
+    */
     fn ty(&self, ctxt: &'t TypeContext<'t>) -> Type<'t> {
         match *self {
             Const::Int {
@@ -247,6 +273,7 @@ impl<'t> ValueLeaf<'t> {
         }
     }
 
+    /*
     unsafe fn to_llvm(self, function: &LlFunction<'t>,
             ctxt: &'t TypeContext<'t>)
             -> LLVMValueRef {
@@ -265,6 +292,7 @@ impl<'t> ValueLeaf<'t> {
             }
         }
     }
+    */
 }
 
 #[derive(Clone, Debug)]
@@ -564,10 +592,10 @@ impl<'t> Value<'t> {
         }
     }
 
+    /*
     unsafe fn to_llvm(self, function: &mut LlFunction<'t>,
             funcs: &HashMap<String, (LLVMValueRef, Type<'t>)>,
             ctxt: &'t TypeContext<'t>) -> LLVMValueRef {
-        use llvm_sys::LLVMIntPredicate::*;
         match self.0 {
             ValueKind::Leaf(v) => {
                 v.to_llvm(function, ctxt)
@@ -821,6 +849,7 @@ impl<'t> Value<'t> {
             }
         }
     }
+    */
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -835,6 +864,13 @@ enum Lvalue<'t> {
 struct Statement<'t>(Lvalue<'t>, Value<'t>);
 
 impl<'t> Statement<'t> {
+    fn to_asm(self, codegen: &mut Generator) {
+        match self.0 {
+            Lvalue::Return => codegen.write_to_ret(self.1),
+            _ => unimplemented!(),
+        }
+    }
+    /*
     unsafe fn to_llvm(self, function: &mut LlFunction<'t>,
             funcs: &HashMap<String, (LLVMValueRef, Type<'t>)>,
             ctxt: &'t TypeContext<'t>) {
@@ -847,6 +883,7 @@ impl<'t> Statement<'t> {
         LLVMBuildStore(function.builder,
             (self.1).to_llvm(function, funcs, ctxt), dst);
     }
+    */
 }
 
 #[derive(Debug)]
@@ -862,6 +899,16 @@ enum Terminator<'t> {
 }
 
 impl<'t> Terminator<'t> {
+    fn to_asm(self, function: &Function, codegen: &mut Generator) {
+        match self {
+            Terminator::Goto(blk) => {
+                codegen.build_goto(&function.get_block_name(&blk))
+            }
+            Terminator::Return => codegen.build_ret(),
+            _ => unimplemented!(),
+        }
+    }
+    /*
     unsafe fn to_llvm(self, function: &LlFunction<'t>,
             ctxt: &'t TypeContext<'t>) {
         match self {
@@ -892,6 +939,7 @@ impl<'t> Terminator<'t> {
             }
         }
     }
+    */
 }
 
 #[derive(Debug, PartialEq)]
@@ -1027,18 +1075,27 @@ impl<'t> BlockData<'t> {
             terminator: term,
         }
     }
+
+    fn to_asm(self, function: &Function, block: Block,
+            codegen: &mut Generator) {
+        codegen.add_block(&function.get_block_name(&block));
+        for stmt in self.statements {
+            stmt.to_asm(codegen);
+        }
+        self.terminator.to_asm(function, codegen);
+    }
 }
 
 pub struct Mir<'t> {
     functions: HashMap<String, Function<'t>>,
-    ctxt: &'t TypeContext<'t>
+    //ctxt: &'t TypeContext<'t>
 }
 
 impl<'t> Mir<'t> {
-    pub fn new(ctxt: &'t TypeContext<'t>) -> Mir<'t> {
+    pub fn new(_ctxt: &'t TypeContext<'t>) -> Mir<'t> {
         Mir {
             functions: HashMap::new(),
-            ctxt: ctxt,
+            //ctxt: ctxt,
         }
     }
 
@@ -1046,10 +1103,25 @@ impl<'t> Mir<'t> {
         self.functions.insert(name, func);
     }
 
-    pub fn build(self, print_llir: bool, opt: bool) {
-        use llvm_sys::transforms::scalar::*;
-        use llvm_sys::analysis::*;
-        use llvm_sys::analysis::LLVMVerifierFailureAction::*;
+    // opt is ignored for now
+    pub fn build<P>(self, output: P, print_asm: bool,
+            _opt: bool) -> Result<(), std::io::Error>
+            where P: AsRef<std::path::Path> {
+        let mut codegen = Generator::new();
+        for (name, _) in &self.functions {
+            codegen.add_global(name);
+        }
+        for (name, function) in self.functions {
+            function.to_asm(&name, &mut codegen);
+        }
+        if print_asm {
+            codegen.print();
+        }
+        try!(codegen.write_to_file(output));
+        Ok(())
+    }
+    /*
+    pub fn build(self, print_asm: bool, opt: bool) {
         unsafe {
             let mut main_output = None;
             let mut llvm_functions = HashMap::new();
@@ -1096,11 +1168,10 @@ impl<'t> Mir<'t> {
             }
         }
     }
+    */
 
+    /*
     unsafe fn run(ty: Type, module: LLVMModuleRef, function: LLVMValueRef) {
-        use llvm_sys::analysis::*;
-        use llvm_sys::execution_engine::*;
-        use llvm_sys::target::*;
         use std::io::Write;
 
         let mut error: *mut ::libc::c_char = std::mem::uninitialized();
@@ -1143,6 +1214,7 @@ impl<'t> Mir<'t> {
         LLVMDisposeGenericValue(res);
         LLVMDisposeExecutionEngine(engine);
     }
+    */
 }
 
 impl<'t> std::fmt::Display for Function<'t> {

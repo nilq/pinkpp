@@ -240,7 +240,7 @@ impl<'t> Expr<'t> {
                         .map_err(|()| AstError::CouldNotUnify {
                             first: Type::unit(ctxt),
                             second: to_unify,
-                            function: function.name.clone(),
+                            function: function.raw.name().to_owned(),
                             compiler: fl!(),
                         }
                     ))
@@ -264,7 +264,7 @@ impl<'t> Expr<'t> {
                     AstError::CouldNotUnify {
                         first: self.ty,
                         second: to_unify,
-                        function: function.name.clone(),
+                        function: function.raw.name().to_owned(),
                         compiler: fl!(),
                     }
                 )
@@ -276,7 +276,7 @@ impl<'t> Expr<'t> {
                         AstError::CouldNotUnify {
                             first: *ty,
                             second: to_unify,
-                            function: function.name.clone(),
+                            function: function.raw.name().to_owned(),
                             compiler: fl!(),
                         }
                     )
@@ -286,14 +286,14 @@ impl<'t> Expr<'t> {
                         AstError::CouldNotUnify {
                             first: ty,
                             second: to_unify,
-                            function: function.name.clone(),
+                            function: function.raw.name().to_owned(),
                             compiler: fl!(),
                         }
                     )
                 } else {
                     Err(AstError::UndefinedVariableName {
                         name: name.clone(),
-                        function: function.name.clone(),
+                        function: function.raw.name().to_owned(),
                         compiler: fl!(),
                     })
                 }
@@ -308,7 +308,7 @@ impl<'t> Expr<'t> {
                     AstError::CouldNotUnify {
                         first: self_ty,
                         second: inner_ty,
-                        function: function.name.clone(),
+                        function: function.raw.name().to_owned(),
                         compiler: fl!(),
                     }
                 )
@@ -323,14 +323,14 @@ impl<'t> Expr<'t> {
                     AstError::CouldNotUnify {
                         first: to_unify,
                         second: inner.ty,
-                        function: function.name.clone(),
+                        function: function.raw.name().to_owned(),
                         compiler: fl!(),
                 }));
                 try!(uf.unify(to_unify, ref_ty).map_err(|()|
                     AstError::CouldNotUnify {
                         first: to_unify,
                         second: ref_ty,
-                        function: function.name.clone(),
+                        function: function.raw.name().to_owned(),
                         compiler: fl!(),
                 }));
                 let self_ty = self.ty;
@@ -338,7 +338,7 @@ impl<'t> Expr<'t> {
                     AstError::CouldNotUnify {
                         first: self_ty,
                         second: ref_ty,
-                        function: function.name.clone(),
+                        function: function.raw.name().to_owned(),
                         compiler: fl!(),
                 })
             }
@@ -350,14 +350,14 @@ impl<'t> Expr<'t> {
                     AstError::CouldNotUnify {
                         first: self_ty,
                         second: outer_ty,
-                        function: function.name.clone(),
+                        function: function.raw.name().to_owned(),
                         compiler: fl!(),
                 }));
                 try!(uf.unify(to_unify, outer_ty).map_err(|()|
                     AstError::CouldNotUnify {
                         first: to_unify,
                         second: outer_ty,
-                        function: function.name.clone(),
+                        function: function.raw.name().to_owned(),
                         compiler: fl!(),
                 }));
 
@@ -385,7 +385,7 @@ impl<'t> Expr<'t> {
                             AstError::CouldNotUnify {
                                 first: ty,
                                 second: to_unify,
-                                function: function.name.clone(),
+                                function: function.raw.name().to_owned(),
                                 compiler: fl!(),
                             }
                         )
@@ -405,7 +405,7 @@ impl<'t> Expr<'t> {
                             AstError::CouldNotUnify {
                                 first: Type::bool(ctxt),
                                 second: to_unify,
-                                function: function.name.clone(),
+                                function: function.raw.name().to_owned(),
                                 compiler: fl!(),
                             }
                         )
@@ -422,7 +422,7 @@ impl<'t> Expr<'t> {
                             AstError::CouldNotUnify {
                                 first: to_unify,
                                 second: Type::bool(ctxt),
-                                function: function.name.clone(),
+                                function: function.raw.name().to_owned(),
                                 compiler: fl!(),
                             }
                         )
@@ -444,7 +444,7 @@ impl<'t> Expr<'t> {
                                 passed: args.len(),
                                 expected: f.input().len(),
                                 callee: callee.clone(),
-                                caller: function.name.clone(),
+                                caller: function.raw.name().to_owned(),
                             })
                         }
 
@@ -458,13 +458,16 @@ impl<'t> Expr<'t> {
                             AstError::CouldNotUnify {
                                 first: ty,
                                 second: to_unify,
-                                function: function.name.clone(),
+                                function: function.raw.name().to_owned(),
                                 compiler: fl!(),
                             }
                         )
                     }
                     None => return Err(
-                        AstError::FunctionDoesntExist(callee.clone()))
+                        AstError::FunctionDoesntExist {
+                            name: callee.clone(),
+                            compiler: fl!(),
+                        })
                 }
             }
             ExprKind::If {
@@ -483,7 +486,7 @@ impl<'t> Expr<'t> {
                     AstError::CouldNotUnify {
                         first: ty,
                         second: to_unify,
-                        function: function.name.clone(),
+                        function: function.raw.name().to_owned(),
                         compiler: fl!(),
                     }
                 )
@@ -496,7 +499,7 @@ impl<'t> Expr<'t> {
                     AstError::CouldNotUnify {
                         first: ty,
                         second: to_unify,
-                        function: function.name.clone(),
+                        function: function.raw.name().to_owned(),
                         compiler: fl!(),
                     }
                 )
@@ -519,7 +522,7 @@ impl<'t> Expr<'t> {
                         } else {
                             return Err(AstError::UndefinedVariableName {
                                 name: name.clone(),
-                                function: function.name.clone(),
+                                function: function.raw.name().to_owned(),
                                 compiler: fl!(),
                             })
                         }
@@ -534,7 +537,7 @@ impl<'t> Expr<'t> {
                     }
                     _ => return Err(AstError::NotAnLvalue {
                         expr: format!("{:?}", dst),
-                        function: function.name.clone(),
+                        function: function.raw.name().to_owned(),
                         compiler: fl!(),
                     })
                 }
@@ -542,7 +545,7 @@ impl<'t> Expr<'t> {
                     AstError::CouldNotUnify {
                         first: Type::unit(ctxt),
                         second: to_unify,
-                        function: function.name.clone(),
+                        function: function.raw.name().to_owned(),
                         compiler: fl!(),
                     }
                 )
@@ -559,7 +562,7 @@ impl<'t> Expr<'t> {
         for stmt in block.stmts.iter_mut() {
             if !live_blk {
                 return Err(AstError::StatementsAfterReturn {
-                    function: function.name.clone(),
+                    function: function.raw.name().to_owned(),
                     compiler: fl!(),
                 });
             }
@@ -572,7 +575,7 @@ impl<'t> Expr<'t> {
                     try!(ty.finalize(uf, ctxt).map_err(|()|
                         AstError::NoActualType {
                             compiler: fl!(),
-                            function: function.name.clone(),
+                            function: function.raw.name().to_owned(),
                         }));
                     if let Some(ref mut v) = *value {
                         try!(v.finalize_type(uf, function, ctxt));
@@ -594,7 +597,7 @@ impl<'t> Expr<'t> {
         if let Some(ref mut expr) = block.expr {
             if !live_blk {
                 return Err(AstError::StatementsAfterReturn {
-                    function: function.name.clone(),
+                    function: function.raw.name().to_owned(),
                     compiler: fl!(),
                 });
             }
@@ -609,7 +612,7 @@ impl<'t> Expr<'t> {
         try!(self.ty.finalize(uf, ctxt).map_err(|()|
            AstError::NoActualType {
                 compiler: fl!(),
-                function: function.name.clone(),
+                function: function.raw.name().to_owned(),
             }
         ));
 
@@ -627,7 +630,7 @@ impl<'t> Expr<'t> {
                         Err(AstError::UnopUnsupported {
                             op: Operand::Plus,
                             inner: self.ty,
-                            function: function.name.clone(),
+                            function: function.raw.name().to_owned(),
                             compiler: fl!(),
                         })
                     }
@@ -642,7 +645,7 @@ impl<'t> Expr<'t> {
                         Err(AstError::UnopUnsupported {
                             op: Operand::Minus,
                             inner: self.ty,
-                            function: function.name.clone(),
+                            function: function.raw.name().to_owned(),
                             compiler: fl!(),
                         })
                     }
@@ -658,7 +661,7 @@ impl<'t> Expr<'t> {
                         Err(AstError::UnopUnsupported {
                             op: Operand::Not,
                             inner: self.ty,
-                            function: function.name.clone(),
+                            function: function.raw.name().to_owned(),
                             compiler: fl!(),
                         })
                     }

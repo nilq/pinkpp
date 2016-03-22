@@ -2,8 +2,6 @@ use std;
 use std::collections::HashMap;
 use std::cell::RefCell;
 use typed_arena::Arena;
-use llvm_sys::prelude::*;
-use llvm_sys::core::*;
 
 pub struct TypeContext<'t> {
     backing_store: Arena<TypeVariant<'t>>,
@@ -52,7 +50,7 @@ impl<'t> std::fmt::Debug for Type<'t> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         match *self.variant {
             TypeVariant::SInt(size) => write!(f, "SInt({:?})", size),
-            TypeVariant::UInt(size) => write!(f, "SInt({:?})", size),
+            TypeVariant::UInt(size) => write!(f, "UInt({:?})", size),
             TypeVariant::Bool => write!(f, "Bool"),
             TypeVariant::Unit => write!(f, "Unit"),
             TypeVariant::Diverging => write!(f, "Diverging"),
@@ -156,6 +154,7 @@ impl<'t> Function<'t> {
         self.output
     }
 
+    /*
     pub fn to_llvm(&self) -> LLVMTypeRef {
         unsafe {
             let mut args = self.input.iter().map(|a| a.to_llvm())
@@ -164,9 +163,11 @@ impl<'t> Function<'t> {
                 args.len() as u32, false as LLVMBool)
         }
     }
+    */
 }
 
 impl<'t> Type<'t> {
+    /*
     pub fn to_llvm(&self) -> LLVMTypeRef {
         unsafe {
             match *self.variant {
@@ -186,7 +187,9 @@ impl<'t> Type<'t> {
             }
         }
     }
+    */
 
+    /*
     pub fn to_llvm_ret(&self) -> LLVMTypeRef {
         unsafe {
             match *self.variant {
@@ -203,6 +206,7 @@ impl<'t> Type<'t> {
             }
         }
     }
+    */
 
     pub fn is_final_type(&self) -> bool {
         match *self.variant {
@@ -306,6 +310,7 @@ impl Int {
         }
     }
 
+    /*
     pub fn size(&self) -> u32 {
         match *self {
             Int::I8 => 8,
@@ -314,6 +319,7 @@ impl Int {
             Int::I64 => 64,
         }
     }
+    */
 }
 
 pub struct UnionFind<'t> {
