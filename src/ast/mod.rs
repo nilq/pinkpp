@@ -64,7 +64,7 @@ impl<'t> Ast<'t> {
             try!(Expr::finalize_block_ty(body, &mut uf, func, &self.ctxt));
         }
         if let Some(&(ref f, _)) = self.functions.get("main") {
-            if *f.ret_ty.variant != TypeVariant::SInt(Int::I32) ||
+            if *f.ret_ty.0 != TypeVariant::SInt(Int::I32) ||
                     f.args.len() != 0 {
                 let mut input = Vec::new();
                 for (_, &(_, ty)) in &f.args {
