@@ -1,3 +1,9 @@
-fn main() -> s32 {
-    3
+fn main() -> u32 {
+    let x = 1;
+    write_to(&x);
+    x
+}
+
+fn write_to(x: &u32) {
+    *x = 0;
 }

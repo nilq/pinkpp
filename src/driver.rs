@@ -1,3 +1,5 @@
+extern crate libc;
+extern crate llvm_sys;
 extern crate argparse;
 extern crate typed_arena;
 
@@ -30,26 +32,23 @@ fn main() {
     use std::io::Read;
 
     let mut name = "".to_owned();
-    let mut output = None;
     let mut print_mir = false;
-    let mut print_asm = false;
+    let mut print_llir = false;
     let mut opt = false;
     {
-        use argparse::{ArgumentParser, Store, StoreOption, StoreTrue};
+        use argparse::{ArgumentParser, Store, StoreTrue};
 
         let mut ap = ArgumentParser::new();
         ap.set_description("The pinkc compiler for the pink language.\n\
             Written in Rust.");
         ap.refer(&mut name).required().add_argument("name", Store,
             "The file to compile");
-        ap.refer(&mut output).add_option(&["-o", "--output"], StoreOption,
-            "Where to put the compiled file");
         ap.refer(&mut print_mir).add_option(&["--print-mir"], StoreTrue,
             "Pass if you would like to print the generated MIR");
-        ap.refer(&mut print_asm).add_option(&["--print-asm"], StoreTrue,
-            "Pass if you would like to print the generated assembly");
+        ap.refer(&mut print_llir).add_option(&["--print-llir"], StoreTrue,
+            "Pass if you would like to print the generated LLVM IR");
         ap.refer(&mut opt).add_option(&["--opt", "-O"], StoreTrue,
-            "Pass if you would like to optimize the generated assembly");
+            "Pass if you would like to optimize the generated LLVM IR");
 
         ap.parse_args_or_exit();
     }
@@ -73,12 +72,5 @@ fn main() {
         println!("{}", mir);
     }
 
-    // TODO(ubsan): write code for other platforms
-    mir.build(&(output.unwrap_or(get_output_from_name(&name))), print_asm, opt)
-        .unwrap()
-}
-
-// TODO(ubsan): take off the ".pnk" of the input file
-fn get_output_from_name(name: &str) -> String {
-    format!("{}.s", name)
+    mir.build(print_llir, opt)
 }

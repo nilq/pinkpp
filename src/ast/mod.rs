@@ -1,7 +1,7 @@
 use std;
 use std::collections::HashMap;
 use parse;
-use ty::{self, Type, TypeVariant, Int};
+use ty::{self, Type};
 use mir;
 
 pub mod expr;
@@ -63,25 +63,6 @@ impl<'t> Ast<'t> {
                 &mut uf, &mut vars, func, &self.function_types));
             try!(Expr::finalize_block_ty(body, &mut uf, func, &self.ctxt));
         }
-        if let Some(&(ref f, _)) = self.functions.get("main") {
-            if *f.ret_ty.variant != TypeVariant::SInt(Int::I32) ||
-                    f.args.len() != 0 {
-                let mut input = Vec::new();
-                for (_, &(_, ty)) in &f.args {
-                    input.push(ty);
-                }
-                return Err(AstError::IncorrectMainType {
-                    input: input,
-                    output: f.ret_ty,
-                    compiler: fl!(),
-                })
-            }
-        } else {
-            return Err(AstError::FunctionDoesntExist {
-                name: "main".to_owned(),
-                compiler: fl!(),
-            })
-        }
         let mut mir = mir::Mir::new(self.ctxt);
         let functions = std::mem::replace(&mut self.functions, HashMap::new());
         for (name, (func, body)) in functions {
@@ -93,11 +74,6 @@ impl<'t> Ast<'t> {
 
 #[derive(Debug)]
 pub enum AstError<'t> {
-    IncorrectMainType {
-        input: Vec<Type<'t>>,
-        output: Type<'t>,
-        compiler: (&'static str, u32),
-    },
     IncorrectNumberOfArguments {
         passed: usize,
         expected: usize,
@@ -110,10 +86,7 @@ pub enum AstError<'t> {
         function: String,
         compiler: (&'static str, u32),
     },
-    FunctionDoesntExist {
-        name: String,
-        compiler: (&'static str, u32),
-    },
+    FunctionDoesntExist(String),
     UnopUnsupported {
         op: parse::Operand,
         inner: Type<'t>,
@@ -160,6 +133,7 @@ pub enum Item<'t> {
 
 #[derive(Debug)]
 pub struct Function<'t> {
+    name: String,
     ret_ty: Type<'t>,
     args: HashMap<String, (usize, Type<'t>)>,
     raw: mir::Function<'t>,
@@ -189,9 +163,10 @@ impl<'t> Function<'t> {
             }
         }
 
-        let raw = mir::Function::new(name, ty::Function::new(args_ty, ret_ty));
+        let raw = mir::Function::new(ty::Function::new(args_ty, ret_ty));
 
         Ok(Function {
+            name: name,
             ret_ty: ret_ty,
             args: args_hashmap,
             raw: raw,
