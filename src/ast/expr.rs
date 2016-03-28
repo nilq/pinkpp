@@ -624,7 +624,7 @@ impl<'t> Expr<'t> {
             ExprKind::Pos(ref mut inner) => {
                 try!(inner.finalize_type(uf, function, ctxt));
                 assert!(self.ty == inner.ty);
-                match *self.ty.0 {
+                match *self.ty.variant {
                     TypeVariant::SInt(_) | TypeVariant::UInt(_) => Ok(()),
                     _ => {
                         Err(AstError::UnopUnsupported {
@@ -639,7 +639,7 @@ impl<'t> Expr<'t> {
             ExprKind::Neg(ref mut inner) => {
                 try!(inner.finalize_type(uf, function, ctxt));
                 assert!(self.ty == inner.ty);
-                match *self.ty.0 {
+                match *self.ty.variant {
                     TypeVariant::SInt(_) => Ok(()),
                     _ => {
                         Err(AstError::UnopUnsupported {
@@ -654,7 +654,7 @@ impl<'t> Expr<'t> {
             ExprKind::Not(ref mut inner) => {
                 try!(inner.finalize_type(uf, function, ctxt));
                 assert!(self.ty == inner.ty);
-                match *self.ty.0 {
+                match *self.ty.variant {
                     TypeVariant::SInt(_) | TypeVariant::UInt(_)
                     | TypeVariant::Bool => Ok(()),
                     _ => {
@@ -709,14 +709,14 @@ impl<'t> Expr<'t> {
                 Self::finalize_block_ty(blk, uf, function, ctxt)
             }
             ExprKind::Return(ref mut ret) => {
-                assert!(*self.ty.0 == TypeVariant::Diverging);
+                assert!(*self.ty.variant == TypeVariant::Diverging);
                 ret.finalize_type(uf, function, ctxt)
             }
             ExprKind::Assign {
                 ref mut src,
                 ..
             } => {
-                assert!(*self.ty.0 == TypeVariant::Unit);
+                assert!(*self.ty.variant == TypeVariant::Unit);
                 src.finalize_type(uf, function, ctxt)
             }
         }

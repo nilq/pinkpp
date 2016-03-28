@@ -551,7 +551,7 @@ impl<'t> Value<'t> {
                 Type::ref_(inner.ty(function, ctxt), ctxt),
             ValueKind::Deref(ref inner) => {
                 if let TypeVariant::Reference(inner) =
-                        *inner.ty(function, ctxt).0 {
+                        *inner.ty(function, ctxt).variant {
                     inner
                 } else {
                     panic!("Deref of a non-ref type: {:?}", inner)
@@ -966,7 +966,7 @@ impl Block {
             fn_types: &HashMap<String, ty::Function<'t>>,
             ctxt: &'t TypeContext<'t>) {
         let leaf = function.get_leaf(ptr, self, fn_types, ctxt);
-        if let TypeVariant::Reference(_) = *leaf.ty(function, ctxt).0 {
+        if let TypeVariant::Reference(_) = *leaf.ty(function, ctxt).variant {
         } else {
             panic!("writing to a not-pointer: {}", leaf.ty(function, ctxt))
         }
@@ -1276,7 +1276,7 @@ impl<'t> std::fmt::Display for Const<'t> {
                 ref ty,
                 ref value,
             } => {
-                match *ty.0 {
+                match *ty.variant {
                     TypeVariant::SInt(_) => write!(f, "{}", *value as i64),
                     TypeVariant::UInt(_) => write!(f, "{}", *value as u64),
                     _ => panic!("Non-integer int"),

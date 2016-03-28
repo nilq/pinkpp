@@ -28,11 +28,13 @@ impl<'t> TypeContext<'t> {
 }
 
 #[derive(Copy, Clone)]
-pub struct Type<'t>(pub &'t TypeVariant<'t>);
+pub struct Type<'t> {
+    pub variant: &'t TypeVariant<'t>,
+}
 
 impl<'t> PartialEq for Type<'t> {
     fn eq(&self, rhs: &Self) -> bool {
-        self.0 as *const _ == rhs.0 as *const _
+        self.variant as *const _ == rhs.variant as *const _
     }
 }
 
@@ -40,13 +42,13 @@ impl<'t> Eq for Type<'t> { }
 
 impl<'t> std::hash::Hash for Type<'t> {
     fn hash<H>(&self, state: &mut H) where H: std::hash::Hasher {
-        (self.0 as *const _).hash(state);
+        (self.variant as *const _).hash(state);
     }
 }
 
 impl<'t> std::fmt::Debug for Type<'t> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        match *self.0 {
+        match *self.variant {
             TypeVariant::SInt(size) => write!(f, "SInt({:?})", size),
             TypeVariant::UInt(size) => write!(f, "UInt({:?})", size),
             TypeVariant::Bool => write!(f, "Bool"),
@@ -63,31 +65,47 @@ impl<'t> std::fmt::Debug for Type<'t> {
 // -- constructors --
 impl<'t> Type<'t> {
     pub fn infer(ctxt: &'t TypeContext<'t>) -> Self {
-        Type(ctxt.get(TypeVariant::Infer(None)))
+        Type {
+            variant: ctxt.get(TypeVariant::Infer(None)),
+        }
     }
 
     pub fn infer_int(ctxt: &'t TypeContext<'t>) -> Self {
-        Type(ctxt.get(TypeVariant::InferInt(None)))
+        Type {
+            variant: ctxt.get(TypeVariant::InferInt(None)),
+        }
     }
 
     pub fn sint(int: Int, ctxt: &'t TypeContext<'t>) -> Self {
-        Type(ctxt.get(TypeVariant::SInt(int)))
+        Type {
+            variant: ctxt.get(TypeVariant::SInt(int)),
+        }
     }
     pub fn uint(int: Int, ctxt: &'t TypeContext<'t>) -> Self {
-        Type(ctxt.get(TypeVariant::UInt(int)))
+        Type {
+            variant: ctxt.get(TypeVariant::UInt(int)),
+        }
     }
     pub fn bool(ctxt: &'t TypeContext<'t>) -> Self {
-        Type(ctxt.get(TypeVariant::Bool))
+        Type {
+            variant: ctxt.get(TypeVariant::Bool),
+        }
     }
     pub fn unit(ctxt: &'t TypeContext<'t>) -> Self {
-        Type(ctxt.get(TypeVariant::Unit))
+        Type {
+            variant: ctxt.get(TypeVariant::Unit),
+        }
     }
     pub fn diverging(ctxt: &'t TypeContext<'t>) -> Self {
-        Type(ctxt.get(TypeVariant::Diverging))
+        Type {
+            variant: ctxt.get(TypeVariant::Diverging),
+        }
     }
 
     pub fn ref_(ty: Type<'t>, ctxt: &'t TypeContext<'t>) -> Self {
-        Type(ctxt.get(TypeVariant::Reference(ty)))
+        Type {
+            variant: ctxt.get(TypeVariant::Reference(ty))
+        }
     }
 }
 
@@ -191,7 +209,7 @@ impl<'t> Type<'t> {
     */
 
     pub fn is_final_type(&self) -> bool {
-        match *self.0 {
+        match *self.variant {
             TypeVariant::SInt(_) | TypeVariant::UInt(_) | TypeVariant::Bool
             | TypeVariant::Unit | TypeVariant::Diverging
                 => true,
@@ -202,12 +220,12 @@ impl<'t> Type<'t> {
 
     pub fn generate_inference_id(&mut self, uf: &mut UnionFind<'t>,
             ctxt: &'t TypeContext<'t>) {
-        self.0 = self.get_inference_type(uf, ctxt);
+        self.variant = self.get_inference_type(uf, ctxt);
     }
 
     fn get_inference_type(&self, uf: &mut UnionFind<'t>,
             ctxt: &'t TypeContext<'t>) -> &'t TypeVariant<'t> {
-        match *self.0 {
+        match *self.variant {
             TypeVariant::Infer(None) => {
                 ctxt.get(TypeVariant::Infer(Some(uf.next_id())))
             }
@@ -216,7 +234,9 @@ impl<'t> Type<'t> {
             }
             TypeVariant::Reference(inner) => {
                 ctxt.get(TypeVariant::Reference(
-                    Type(inner.get_inference_type(uf, ctxt))
+                    Type {
+                        variant: inner.get_inference_type(uf, ctxt),
+                    }
                 ))
             }
             ref t @ TypeVariant::SInt(_) | ref t @ TypeVariant::UInt(_)
@@ -237,7 +257,7 @@ impl<'t> Type<'t> {
 
     fn get_final_ty(&self, uf: &mut UnionFind<'t>, ctxt: &'t TypeContext<'t>)
             -> Option<Type<'t>> {
-        match *self.0 {
+        match *self.variant {
             TypeVariant::SInt(_) | TypeVariant::UInt(_) | TypeVariant::Bool
             | TypeVariant::Unit | TypeVariant::Diverging => {
                 Some(*self)
@@ -260,7 +280,7 @@ impl<'t> Type<'t> {
 
 impl<'t> std::fmt::Display for Type<'t> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        let s = match *self.0 {
+        let s = match *self.variant {
             TypeVariant::SInt(Int::I8) => "s8",
             TypeVariant::SInt(Int::I16) => "s16",
             TypeVariant::SInt(Int::I32) => "s32",
@@ -337,7 +357,7 @@ impl<'t> UnionFind<'t> {
                 if a.is_final_type() && b.is_final_type() && a == b {
                     Ok(())
                 } else {
-                    match (*a.0, *b.0) {
+                    match (*a.variant, *b.variant) {
                         (TypeVariant::Reference(lhs),
                                 TypeVariant::Reference(rhs)) => {
                             self.unify(lhs, rhs)
@@ -347,7 +367,7 @@ impl<'t> UnionFind<'t> {
                 }
             }
             (None, None) => {
-                match (*a.0, *b.0) {
+                match (*a.variant, *b.variant) {
                     (TypeVariant::Infer(Some(lid)),
                             TypeVariant::Infer(Some(rid)))
                     | (TypeVariant::Infer(Some(lid)),
@@ -370,14 +390,14 @@ impl<'t> UnionFind<'t> {
                 }
             }
             (Some(ty), None) => {
-                match *b.0 {
+                match *b.variant {
                     TypeVariant::Infer(Some(id)) => {
                         let id = self.find(id) as usize;
                         self.parents_ty[id] = Some(ty);
                         Ok(())
                     }
                     TypeVariant::InferInt(Some(id)) => {
-                        match *ty.0 {
+                        match *ty.variant {
                             TypeVariant::UInt(_) | TypeVariant::SInt(_) => {
                                 let id = self.find(id) as usize;
                                 self.parents_ty[id] = Some(ty);
@@ -396,14 +416,14 @@ impl<'t> UnionFind<'t> {
                 }
             }
             (None, Some(ty)) => {
-                match *a.0 {
+                match *a.variant {
                     TypeVariant::Infer(Some(id)) => {
                         let id = self.find(id) as usize;
                         self.parents_ty[id] = Some(ty);
                         Ok(())
                     }
                     TypeVariant::InferInt(Some(id)) => {
-                        match *ty.0 {
+                        match *ty.variant {
                             TypeVariant::UInt(_) | TypeVariant::SInt(_) => {
                                 let id = self.find(id) as usize;
                                 self.parents_ty[id] = Some(ty);
@@ -425,7 +445,7 @@ impl<'t> UnionFind<'t> {
     }
 
     pub fn resolve(&self, ty: Type<'t>) -> Option<Type<'t>> {
-        match *ty.0 {
+        match *ty.variant {
             TypeVariant::Infer(Some(id)) | TypeVariant::InferInt(Some(id)) => {
                 self.parents_ty[self.find(id) as usize]
             }
