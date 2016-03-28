@@ -1,13 +1,7 @@
-extern crate libc;
-extern crate llvm_sys;
+#![feature(set_recovery)]
+
 extern crate argparse;
 extern crate typed_arena;
-
-macro_rules! cstr {
-    ($s:expr) => (
-        concat!($s, "\0").as_ptr() as *const ::libc::c_char
-    )
-}
 
 macro_rules! fl {
     () => ((file!(), line!()));

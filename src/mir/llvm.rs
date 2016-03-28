@@ -1,21 +1,32 @@
 use std;
 use std::ffi::{CStr, CString};
 use ty;
-use llvm_sys::*;
-use llvm_sys::prelude::*;
-use llvm_sys::core::*;
-use llvm_sys::target::*;
-use llvm_sys::target_machine::*;
-use llvm_sys::transforms::scalar::*;
-use llvm_sys::analysis::*;
-use libc::c_char;
 
-pub use llvm_sys::LLVMIntPredicate::{LLVMIntEQ as IntEQ, LLVMIntNE as IntNE,
-    LLVMIntUGT as IntUGT, LLVMIntUGE as IntUGE, LLVMIntULT as IntULT,
-    LLVMIntULE as IntULE, LLVMIntSGT as IntSGT, LLVMIntSGE as IntSGE,
-    LLVMIntSLT as IntSLT, LLVMIntSLE as IntSLE};
+extern crate llvm_sys;
+extern crate libc;
+use self::libc::c_char;
+use self::llvm_sys::*;
+use self::llvm_sys::prelude::*;
+use self::llvm_sys::core::*;
+use self::llvm_sys::target::*;
+use self::llvm_sys::target_machine::*;
+use self::llvm_sys::transforms::scalar::*;
+use self::llvm_sys::analysis::*;
 
-pub use llvm_sys::target_machine::LLVMCodeGenOptLevel::{
+// TODO(ubsan): ZSTs should not be passed into functions
+
+macro_rules! cstr {
+    ($s:expr) => (
+        concat!($s, "\0").as_ptr() as *const self::libc::c_char
+    )
+}
+
+pub use self::llvm_sys::LLVMIntPredicate::{LLVMIntEQ as IntEQ,
+    LLVMIntNE as IntNE, LLVMIntUGT as IntUGT, LLVMIntUGE as IntUGE,
+    LLVMIntULT as IntULT, LLVMIntULE as IntULE, LLVMIntSGT as IntSGT,
+    LLVMIntSGE as IntSGE, LLVMIntSLT as IntSLT, LLVMIntSLE as IntSLE};
+
+pub use self::llvm_sys::target_machine::LLVMCodeGenOptLevel::{
     LLVMCodeGenLevelNone as NoOptimization,
     LLVMCodeGenLevelLess as LessOptimization,
     LLVMCodeGenLevelDefault as DefaultOptimization,
@@ -334,7 +345,7 @@ impl Module {
 
     pub fn verify(&self) {
         unsafe {
-            let mut error: *mut ::libc::c_char = std::mem::uninitialized();
+            let mut error: *mut c_char = std::mem::uninitialized();
             LLVMVerifyModule(self.0,
                 LLVMVerifierFailureAction::LLVMAbortProcessAction, &mut error);
             LLVMDisposeMessage(error);
@@ -403,10 +414,15 @@ pub fn get_type(target_data: &TargetData, ty: ty::Type) -> Type {
             TypeVariant::SInt(ref size) | TypeVariant::UInt(ref size)
                 => LLVMIntType(size.size()),
             TypeVariant::Bool => LLVMInt1Type(),
-            TypeVariant::Unit => LLVMStructType(std::ptr::null_mut(), 0,
-                    false as LLVMBool),
             TypeVariant::Reference(inner) =>
                 LLVMPointerType(get_type(target_data, inner).0, 0),
+            TypeVariant::Tuple(ref v) => {
+                let mut llvm =
+                    v.iter().map(|el| get_type(target_data, *el).0)
+                        .collect::<Vec<_>>();
+                LLVMStructType(llvm.as_mut_ptr(), llvm.len() as u32,
+                    false as LLVMBool)
+            }
             TypeVariant::Diverging
                 => panic!("ICE: Attempted to get the LLVM type of \
                     Diverging"),

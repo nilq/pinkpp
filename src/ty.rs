@@ -1,18 +1,19 @@
 use std;
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::cell::RefCell;
 use typed_arena::Arena;
 
 pub struct TypeContext<'t> {
     backing_store: Arena<TypeVariant<'t>>,
-    type_references: RefCell<HashMap<TypeVariant<'t>, &'t TypeVariant<'t>>>,
+    // allows us to get the exact reference in the type Arena
+    type_references: RefCell<HashSet<&'t TypeVariant<'t>>>,
 }
 
 impl<'t> TypeContext<'t> {
     pub fn new() -> Self {
         TypeContext {
             backing_store: Arena::new(),
-            type_references: RefCell::new(HashMap::new()),
+            type_references: RefCell::new(HashSet::new()),
         }
     }
 
@@ -22,7 +23,7 @@ impl<'t> TypeContext<'t> {
         }
 
         let var = self.backing_store.alloc(variant);
-        self.type_references.borrow_mut().insert(variant, var);
+        self.type_references.borrow_mut().insert(var);
         var
     }
 }
@@ -50,10 +51,20 @@ impl<'t> std::fmt::Debug for Type<'t> {
             TypeVariant::SInt(size) => write!(f, "SInt({:?})", size),
             TypeVariant::UInt(size) => write!(f, "SInt({:?})", size),
             TypeVariant::Bool => write!(f, "Bool"),
-            TypeVariant::Unit => write!(f, "Unit"),
             TypeVariant::Diverging => write!(f, "Diverging"),
             TypeVariant::Reference(inner) =>
                 write!(f, "Ref({:?})", inner),
+            TypeVariant::Tuple(ref v) => {
+                if v.len() == 0 {
+                    write!(f, "Tuple()")
+                } else {
+                    try!(write!(f, "Tuple("));
+                    for el in &v[..v.len() - 1] {
+                        try!(write!(f, "{:?}, ", el));
+                    }
+                    write!(f, "{:?})", v[v.len() - 1])
+                }
+            }
             TypeVariant::Infer(i) => write!(f, "Infer({:?})", i),
             TypeVariant::InferInt(i) => write!(f, "InferInt({:?})", i),
         }
@@ -79,28 +90,32 @@ impl<'t> Type<'t> {
     pub fn bool(ctxt: &'t TypeContext<'t>) -> Self {
         Type(ctxt.get(TypeVariant::Bool))
     }
-    pub fn unit(ctxt: &'t TypeContext<'t>) -> Self {
-        Type(ctxt.get(TypeVariant::Unit))
-    }
-    pub fn diverging(ctxt: &'t TypeContext<'t>) -> Self {
-        Type(ctxt.get(TypeVariant::Diverging))
-    }
 
     pub fn ref_(ty: Type<'t>, ctxt: &'t TypeContext<'t>) -> Self {
         Type(ctxt.get(TypeVariant::Reference(ty)))
     }
+    pub fn unit(ctxt: &'t TypeContext<'t>) -> Self {
+        Self::tuple(vec![], ctxt)
+    }
+    pub fn tuple(elements: Vec<Type<'t>>, ctxt: &'t TypeContext<'t>) -> Self {
+        Type(ctxt.get(TypeVariant::Tuple(elements)))
+    }
+
+    pub fn diverging(ctxt: &'t TypeContext<'t>) -> Self {
+        Type(ctxt.get(TypeVariant::Diverging))
+    }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum TypeVariant<'t> {
     SInt(Int),
     UInt(Int),
     Bool,
-    Unit,
 
     Diverging,
 
     Reference(Type<'t>),
+    Tuple(Vec<Type<'t>>),
 
     Infer(Option<u32>),
     InferInt(Option<u32>),
@@ -142,9 +157,17 @@ impl<'t> Type<'t> {
     pub fn is_final_type(&self) -> bool {
         match *self.0 {
             TypeVariant::SInt(_) | TypeVariant::UInt(_) | TypeVariant::Bool
-            | TypeVariant::Unit | TypeVariant::Diverging
+            | TypeVariant::Diverging
                 => true,
             TypeVariant::Reference(inner) => inner.is_final_type(),
+            TypeVariant::Tuple(ref v) => {
+                for el in v {
+                    if !el.is_final_type() {
+                        return false;
+                    }
+                }
+                true
+            }
             TypeVariant::Infer(_) | TypeVariant::InferInt(_) => false,
         }
     }
@@ -168,9 +191,16 @@ impl<'t> Type<'t> {
                     Type(inner.get_inference_type(uf, ctxt))
                 ))
             }
+            TypeVariant::Tuple(ref v) => {
+                let mut v = v.clone();
+                for el in &mut v {
+                    el.generate_inference_id(uf, ctxt);
+                }
+                ctxt.get(TypeVariant::Tuple(v))
+            }
             ref t @ TypeVariant::SInt(_) | ref t @ TypeVariant::UInt(_)
             | ref t @ TypeVariant::Bool | ref t @ TypeVariant::Diverging
-            | ref t @ TypeVariant::Unit | ref t @ TypeVariant::Infer(Some(_))
+            | ref t @ TypeVariant::Infer(Some(_))
             | ref t @ TypeVariant::InferInt(Some(_)) => t,
         }
     }
@@ -188,7 +218,7 @@ impl<'t> Type<'t> {
             -> Option<Type<'t>> {
         match *self.0 {
             TypeVariant::SInt(_) | TypeVariant::UInt(_) | TypeVariant::Bool
-            | TypeVariant::Unit | TypeVariant::Diverging => {
+            | TypeVariant::Diverging => {
                 Some(*self)
             }
             TypeVariant::Reference(inner) => {
@@ -196,6 +226,16 @@ impl<'t> Type<'t> {
                     Some(inner) => Some(Type::ref_(inner, ctxt)),
                     None => None,
                 }
+            }
+            TypeVariant::Tuple(ref v) => {
+                let mut v = v.clone();
+                for el in &mut v {
+                    match el.get_final_ty(uf, ctxt) {
+                        Some(inner) => *el = inner,
+                        None => return None,
+                    }
+                }
+                Some(Type::tuple(v, ctxt))
             }
             TypeVariant::Infer(_) | TypeVariant::InferInt(_) => {
                 match uf.resolve(*self) {
@@ -219,9 +259,19 @@ impl<'t> std::fmt::Display for Type<'t> {
             TypeVariant::UInt(Int::I32) => "u32",
             TypeVariant::UInt(Int::I64) => "u64",
             TypeVariant::Bool => "bool",
-            TypeVariant::Unit => "()",
             TypeVariant::Diverging => "!",
             TypeVariant::Reference(inner) => return write!(f, "&{}", inner),
+            TypeVariant::Tuple(ref v) => {
+                try!(write!(f, "("));
+                if v.len() == 0 {
+                    return write!(f,  ")");
+                } else {
+                    for el in &v[..v.len() - 1] {
+                        try!(write!(f, "{}, ", el));
+                    }
+                    return write!(f, "{})", v[v.len() - 1]);
+                }
+            }
             TypeVariant::Infer(_) | TypeVariant::InferInt(_) => "_",
         };
         write!(f, "{}", s)
@@ -284,9 +334,9 @@ impl<'t> UnionFind<'t> {
                 if a.is_final_type() && b.is_final_type() && a == b {
                     Ok(())
                 } else {
-                    match (*a.0, *b.0) {
-                        (TypeVariant::Reference(lhs),
-                                TypeVariant::Reference(rhs)) => {
+                    match (a.0, b.0) {
+                        (&TypeVariant::Reference(lhs),
+                                &TypeVariant::Reference(rhs)) => {
                             self.unify(lhs, rhs)
                         }
                         _ => Err(())
@@ -294,22 +344,22 @@ impl<'t> UnionFind<'t> {
                 }
             }
             (None, None) => {
-                match (*a.0, *b.0) {
-                    (TypeVariant::Infer(Some(lid)),
-                            TypeVariant::Infer(Some(rid)))
-                    | (TypeVariant::Infer(Some(lid)),
-                            TypeVariant::InferInt(Some(rid)))
-                    | (TypeVariant::InferInt(Some(lid)),
-                            TypeVariant::Infer(Some(rid)))
-                    | (TypeVariant::InferInt(Some(lid)),
-                            TypeVariant::InferInt(Some(rid))) => {
+                match (a.0, b.0) {
+                    (&TypeVariant::Infer(Some(lid)),
+                            &TypeVariant::Infer(Some(rid)))
+                    | (&TypeVariant::Infer(Some(lid)),
+                            &TypeVariant::InferInt(Some(rid)))
+                    | (&TypeVariant::InferInt(Some(lid)),
+                            &TypeVariant::Infer(Some(rid)))
+                    | (&TypeVariant::InferInt(Some(lid)),
+                            &TypeVariant::InferInt(Some(rid))) => {
                         self.union(lid, rid);
                         Ok(())
                     }
-                    (lhs @ TypeVariant::Infer(None), rhs)
-                    | (lhs @ TypeVariant::InferInt(None), rhs)
-                    | (rhs, lhs @ TypeVariant::Infer(None))
-                    | (lhs, rhs @ TypeVariant::InferInt(None)) =>
+                    (lhs @ &TypeVariant::Infer(None), rhs)
+                    | (lhs @ &TypeVariant::InferInt(None), rhs)
+                    | (rhs, lhs @ &TypeVariant::Infer(None))
+                    | (lhs, rhs @ &TypeVariant::InferInt(None)) =>
                         panic!("ICE: attempted to unify {:?} with {:?}",
                             lhs, rhs),
                     (l, r)
@@ -335,11 +385,11 @@ impl<'t> UnionFind<'t> {
                             }
                         }
                     }
-                    t @ TypeVariant::Infer(None)
-                    | t @ TypeVariant::InferInt(None) =>
+                    ref t @ TypeVariant::Infer(None)
+                    | ref t @ TypeVariant::InferInt(None) =>
                         panic!("ICE: attempted to unify {:?} with {:?}",
                             ty, t),
-                    t => panic!("ICE: resolve isn't working: {:?}", t)
+                    ref t => panic!("ICE: resolve isn't working: {:?}", t)
                 }
             }
             (None, Some(ty)) => {
@@ -361,11 +411,11 @@ impl<'t> UnionFind<'t> {
                             }
                         }
                     }
-                    t @ TypeVariant::Infer(None)
-                    | t @ TypeVariant::InferInt(None) =>
+                    ref t @ TypeVariant::Infer(None)
+                    | ref t @ TypeVariant::InferInt(None) =>
                         panic!("ICE: attempted to unify {:?} with {:?}",
                             ty, t),
-                    t => panic!("ICE: resolve isn't working: {:?}", t)
+                    ref t => panic!("ICE: resolve isn't working: {:?}", t)
                 }
             }
         }

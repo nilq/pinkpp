@@ -765,7 +765,7 @@ impl<'t> Expr<'t> {
                 ref mut src,
                 ..
             } => {
-                assert!(*self.ty.0 == TypeVariant::Unit);
+                assert!(*self.ty.0 == TypeVariant::Tuple(vec![]));
                 src.finalize_type(uf, function, ctxt)
             }
         }
