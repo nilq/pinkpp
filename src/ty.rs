@@ -339,6 +339,13 @@ impl<'t> UnionFind<'t> {
                                 &TypeVariant::Reference(rhs)) => {
                             self.unify(lhs, rhs)
                         }
+                        (&TypeVariant::Tuple(ref left),
+                                &TypeVariant::Tuple(ref right)) => {
+                            for (l, r) in left.into_iter().zip(right) {
+                                try!(self.unify(*l, *r))
+                            }
+                            Ok(())
+                        }
                         _ => Err(())
                     }
                 }

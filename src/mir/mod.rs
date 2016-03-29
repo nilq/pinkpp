@@ -180,50 +180,62 @@ impl<'t> LlFunction<'t> {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
-enum Const<'t> {
+// TODO(ubsan): get rid of Clone, switch to Clone and CloneData implementation
+#[derive(Clone, Debug)]
+enum Literal<'t> {
     Int {
         value: u64,
         ty: Type<'t>,
     },
     Bool(bool),
-    Unit,
+    Tuple(Vec<ValueLeaf<'t>>),
 }
 
-impl<'t> Const<'t> {
-    unsafe fn to_llvm(self, mir: &Mir<'t>) -> llvm::Value {
+impl<'t> Literal<'t> {
+    unsafe fn to_llvm(self, mir: &Mir<'t>, function: &LlFunction<'t>)
+            -> llvm::Value {
         match self {
-            Const::Int {
+            Literal::Int {
                 value,
                 ty,
             } => {
                 llvm::Value::const_int(
                     llvm::get_type(&mir.target_data, ty), value)
             }
-            Const::Bool(value) => {
+            Literal::Bool(value) => {
                 llvm::Value::const_bool(value)
             }
-            Const::Unit => {
-                llvm::Value::const_struct(&[])
+            Literal::Tuple(v) => {
+                let mut llvm_v = Vec::new();
+                for el in v {
+                    llvm_v.push(el.to_llvm(mir, function));
+                }
+                llvm::Value::const_struct(&llvm_v)
             }
         }
     }
 
-    fn ty(&self, mir: &Mir<'t>) -> Type<'t> {
+    fn ty(&self, mir: &Mir<'t>, function: &Function<'t>) -> Type<'t> {
         match *self {
-            Const::Int {
+            Literal::Int {
                 ty,
                 ..
             } => ty,
-            Const::Bool(_) => Type::bool(mir.ctxt),
-            Const::Unit => Type::unit(mir.ctxt),
+            Literal::Bool(_) => Type::bool(mir.ctxt),
+            Literal::Tuple(ref v) => {
+                let mut type_v = Vec::new();
+                for el in v {
+                    type_v.push(el.ty(mir, function));
+                }
+                Type::tuple(type_v, mir.ctxt)
+            }
         }
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 enum ValueLeaf<'t> {
-    Const(Const<'t>),
+    Literal(Literal<'t>),
     Parameter(Parameter),
     Variable(Variable),
     Temporary(Temporary),
@@ -232,7 +244,7 @@ enum ValueLeaf<'t> {
 impl<'t> ValueLeaf<'t> {
     fn ty(&self, mir: &Mir<'t>, function: &Function<'t>) -> Type<'t> {
         match *self {
-            ValueLeaf::Const(ref inner) => inner.ty(mir),
+            ValueLeaf::Literal(ref inner) => inner.ty(mir, function),
             ValueLeaf::Temporary(ref tmp) => function.get_tmp_ty(tmp),
             ValueLeaf::Parameter(ref par) => function.get_par_ty(par),
             ValueLeaf::Variable(ref var) => function.get_local_ty(var),
@@ -242,8 +254,8 @@ impl<'t> ValueLeaf<'t> {
     unsafe fn to_llvm(self, mir: &Mir<'t>, function: &LlFunction<'t>)
             -> llvm::Value {
         match self {
-            ValueLeaf::Const(inner) => {
-                inner.to_llvm(mir)
+            ValueLeaf::Literal(inner) => {
+                inner.to_llvm(mir, function)
             }
             ValueLeaf::Temporary(tmp) => {
                 function.get_tmp_value(&tmp)
@@ -297,7 +309,7 @@ enum ValueKind<'t> {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Value<'t>(ValueKind<'t>);
 
 // --- CONSTRUCTORS ---
@@ -306,7 +318,7 @@ impl<'t> Value<'t> {
     #[inline(always)]
     pub fn const_int(value: u64, ty: Type<'t>) -> Self {
         Value::leaf(
-            ValueLeaf::Const(Const::Int {
+            ValueLeaf::Literal(Literal::Int {
                 value: value,
                 ty: ty,
             }
@@ -314,11 +326,25 @@ impl<'t> Value<'t> {
     }
     #[inline(always)]
     pub fn const_bool(value: bool) -> Self {
-        Value::leaf(ValueLeaf::Const(Const::Bool(value)))
+        Value::leaf(ValueLeaf::Literal(Literal::Bool(value)))
+    }
+    #[inline(always)]
+    pub fn tuple_literal(v: Vec<Value<'t>>, mir: &Mir<'t>,
+            function: &mut Function<'t>, block: &mut Block,
+            fn_types: &HashMap<String, ty::Function<'t>>) -> Value<'t> {
+        let mut leaf_v = Vec::new();
+        for el in v {
+            leaf_v.push(function.get_leaf(mir, el, block, fn_types))
+        }
+        Value::leaf(ValueLeaf::Literal(Literal::Tuple(leaf_v)))
+    }
+    #[inline(always)]
+    pub fn unit_literal() -> Value<'t> {
+        Value::leaf(ValueLeaf::Literal(Literal::Tuple(vec![])))
     }
     #[inline(always)]
     pub fn const_unit() -> Value<'t> {
-        Value::leaf(ValueLeaf::Const(Const::Unit))
+        Value::leaf(ValueLeaf::Literal(Literal::Tuple(vec![])))
     }
 
     pub fn param(arg_num: u32, function: &mut Function) -> Self {
@@ -802,7 +828,7 @@ impl<'t> Value<'t> {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 enum Lvalue<'t> {
     Variable(Variable),
     Temporary(Temporary),
@@ -902,7 +928,7 @@ impl Block {
             fn_types: &HashMap<String, ty::Function<'t>>) {
         let leaf = function.get_leaf(mir, val, self, fn_types);
         let leaf = match leaf {
-            l @ ValueLeaf::Const(_) => {
+            l @ ValueLeaf::Literal(_) => {
                 let ty = l.ty(mir, function);
                 let tmp = function.new_tmp(ty);
                 self.add_stmt(Lvalue::Temporary(tmp), Value::leaf(l),
@@ -946,7 +972,7 @@ impl Block {
                     then_blk: Block(then.0),
                     else_blk: Block(else_.0)
                 });
-            (blk.expr, term)
+            (blk.expr.clone(), term)
         };
         let join = function.new_block(expr, term);
 
@@ -972,7 +998,7 @@ impl Block {
     pub fn finish<'t>(mut self, function: &mut Function<'t>,
             value: Value<'t>) {
         let blk = function.get_block(&mut self);
-        blk.statements.push(Statement(blk.expr, value));
+        blk.statements.push(Statement(blk.expr.clone(), value));
     }
 
     fn terminate<'t>(&mut self, function: &mut Function<'t>,

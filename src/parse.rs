@@ -667,8 +667,23 @@ impl<'src> Parser<'src> {
                 })
             },
             Token::OpenParen => {
-                try!(self.eat(Token::CloseParen, line!()));
-                Ok(Type::unit(ctxt))
+                let mut v = Vec::new();
+                loop {
+                    if let Some(_) = try!(self.maybe_eat(Token::CloseParen)) {
+                        break;
+                    }
+                    v.push(try!(self.parse_ty(ctxt, line!())));
+                    if let None = try!(self.maybe_eat(Token::Comma)) {
+                        if v.len() == 1 {
+                            try!(self.eat(Token::CloseParen, line!()));
+                            return Ok(v.remove(0));
+                        } else {
+                            try!(self.eat(Token::CloseParen, line!()));
+                            break;
+                        }
+                    }
+                }
+                Ok(Type::tuple(v, ctxt))
             }
             Token::Operand(Operand::And) => {
                 let inner = try!(self.parse_ty(ctxt, line));
@@ -757,14 +772,23 @@ impl<'src> Parser<'src> {
                 Ok(Some(Expr::int_lit_with_ty(value, ty)))
             }
             Token::OpenParen => {
-                if let Some(_) =
-                        try!(self.maybe_eat(Token::CloseParen)) {
-                    Ok(Some(Expr::unit_lit(ctxt)))
-                } else {
-                    let expr = try!(self.parse_expr(ctxt, line!()));
-                    try!(self.eat(Token::CloseParen, line!()));
-                    Ok(Some(expr))
+                let mut v = Vec::new();
+                loop {
+                    if let Some(_) = try!(self.maybe_eat(Token::CloseParen)) {
+                        break;
+                    }
+                    v.push(try!(self.parse_single_expr(ctxt, line!())));
+                    if let None = try!(self.maybe_eat(Token::Comma)) {
+                        if v.len() == 1 {
+                            try!(self.eat(Token::CloseParen, line!()));
+                            return Ok(Some(v.remove(0)));
+                        } else {
+                            try!(self.eat(Token::CloseParen, line!()));
+                            break;
+                        }
+                    }
                 }
+                Ok(Some(Expr::tuple_lit(v, ctxt)))
             }
             Token::Operand(Operand::Minus) => {
                 let inner = try!(self.parse_single_expr(ctxt, line!()));

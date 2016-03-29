@@ -1,4 +1,4 @@
-use super::{Mir, Function, Terminator, Statement, Lvalue, Const,
+use super::{Mir, Function, Terminator, Statement, Lvalue, Literal,
     Value, ValueLeaf, ValueKind};
 use ty::TypeVariant;
 use std::fmt::{Debug, Display, Formatter, Error};
@@ -55,10 +55,10 @@ impl<'t> Display for Lvalue<'t> {
     }
 }
 
-impl<'t> Display for Const<'t> {
+impl<'t> Display for Literal<'t> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         match *self {
-            Const::Int {
+            Literal::Int {
                 ref ty,
                 ref value,
             } => {
@@ -68,8 +68,18 @@ impl<'t> Display for Const<'t> {
                     _ => panic!("Non-integer int"),
                 }
             }
-            Const::Bool(ref value) => write!(f, "{}", value),
-            Const::Unit => write!(f, "()"),
+            Literal::Bool(ref value) => write!(f, "{}", value),
+            Literal::Tuple(ref v) => {
+                try!(write!(f, "("));
+                if v.len() == 0 {
+                    write!(f, ")")
+                } else {
+                    for el in &v[..v.len() - 1] {
+                        try!(write!(f, "{}, ", el));
+                    }
+                    write!(f, "{})", v[v.len() - 1])
+                }
+            }
         }
     }
 }
@@ -77,7 +87,7 @@ impl<'t> Display for Const<'t> {
 impl<'t> Display for ValueLeaf<'t> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         match *self {
-            ValueLeaf::Const(ref inner) => write!(f, "const {}", inner),
+            ValueLeaf::Literal(ref inner) => write!(f, "const {}", inner),
             ValueLeaf::Temporary(ref tmp) => write!(f, "tmp{}", tmp.0),
             ValueLeaf::Parameter(ref par) => write!(f, "arg{}", par.0),
             ValueLeaf::Variable(ref var) => write!(f, "var{}", var.0),

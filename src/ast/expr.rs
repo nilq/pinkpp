@@ -39,7 +39,7 @@ pub enum ExprKind<'t> {
     Variable(String),
     IntLiteral(u64),
     BoolLiteral(bool),
-    UnitLiteral,
+    TupleLiteral(Vec<Expr<'t>>),
     Return(Box<Expr<'t>>),
     Assign {
         dst: Box<Expr<'t>>,
@@ -114,8 +114,12 @@ impl<'t> Expr<'t> {
     }
 
     pub fn unit_lit(ctxt: &'t TypeContext<'t>) -> Self {
+        Self::tuple_lit(vec![], ctxt)
+    }
+
+    pub fn tuple_lit(v: Vec<Expr<'t>>, ctxt: &'t TypeContext<'t>) -> Self {
         Expr {
-            kind: ExprKind::UnitLiteral,
+            kind: ExprKind::TupleLiteral(v),
             ty: Type::unit(ctxt),
         }
     }
@@ -182,7 +186,7 @@ impl<'t> Expr<'t> {
             ExprKind::Call {..} | ExprKind::Binop {..} | ExprKind::Pos(_)
             | ExprKind::Neg(_) | ExprKind::Not(_) | ExprKind::Variable(_)
             | ExprKind::Ref(_) | ExprKind::Deref(_) | ExprKind::IntLiteral(_)
-            | ExprKind::BoolLiteral(_) | ExprKind::UnitLiteral
+            | ExprKind::BoolLiteral(_) | ExprKind::TupleLiteral(_)
             | ExprKind::Return(_) | ExprKind::Assign {..} => false,
         }
     }
@@ -258,11 +262,27 @@ impl<'t> Expr<'t> {
             -> Result<(), AstError<'t>> {
         self.ty.generate_inference_id(uf, ctxt);
         match self.kind {
-            ExprKind::IntLiteral(_) | ExprKind::BoolLiteral(_)
-            | ExprKind::UnitLiteral => {
+            ExprKind::IntLiteral(_) | ExprKind::BoolLiteral(_) => {
                 uf.unify(self.ty, to_unify).map_err(|()|
                     AstError::CouldNotUnify {
                         first: self.ty,
+                        second: to_unify,
+                        function: function.name.clone(),
+                        compiler: fl!(),
+                    }
+                )
+            }
+            ExprKind::TupleLiteral(ref mut v) => {
+                let mut ty_vec = Vec::new();
+                for el in v {
+                    el.ty.generate_inference_id(uf, ctxt);
+                    ty_vec.push(el.ty);
+                }
+                self.ty = Type::tuple(ty_vec, ctxt);
+                let ty = self.ty;
+                uf.unify(self.ty, to_unify).map_err(|()|
+                    AstError::CouldNotUnify {
+                        first: ty,
                         second: to_unify,
                         function: function.name.clone(),
                         compiler: fl!(),
@@ -667,7 +687,18 @@ impl<'t> Expr<'t> {
 
         match self.kind {
             ExprKind::IntLiteral(_) | ExprKind::BoolLiteral(_)
-            | ExprKind::UnitLiteral | ExprKind::Variable(_) => {
+            | ExprKind::Variable(_) => {
+                Ok(())
+            }
+            ExprKind::TupleLiteral(ref mut v) => {
+                for el in v {
+                    try!(el.ty.finalize(uf, ctxt).map_err(|()|
+                        AstError::NoActualType {
+                            compiler: fl!(),
+                            function: function.name.clone(),
+                        }
+                    ))
+                }
                 Ok(())
             }
             ExprKind::Pos(ref mut inner) => {
@@ -786,8 +817,21 @@ impl<'t> Expr<'t> {
             ExprKind::BoolLiteral(b) => {
                 (mir::Value::const_bool(b), Some(block))
             }
-            ExprKind::UnitLiteral => {
-                (mir::Value::const_unit(), Some(block))
+            ExprKind::TupleLiteral(v) => {
+                let mut mir_v = Vec::new();
+                let mut blk = Some(block);
+                for el in v {
+                    if let Some(block) = blk.take() {
+                        let (val, block) = el.translate(mir, function,
+                            block, locals, fn_types);
+                        blk = block;
+                        mir_v.push(val);
+                    } else {
+                        return (mir::Value::unit_literal(), None);
+                    }
+                }
+                (mir::Value::tuple_literal(mir_v, mir, &mut function.raw,
+                    blk.as_mut().unwrap(), fn_types), blk)
             }
             ExprKind::Variable(name) => {
                 if let Some(var) = locals.get(&name) {
