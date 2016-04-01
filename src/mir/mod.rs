@@ -13,12 +13,11 @@ pub struct Function<'t> {
     ty: ty::Function<'t>,
     temporaries: Vec<Type<'t>>,
     locals: Vec<Type<'t>>,
-    blocks: Vec<BlockData<'t>>,
+    blocks: Vec<BlockData>,
 }
+// TODO(ubsan): connect Variable and Temporary into one Local type
 #[derive(Copy, Clone, Debug)]
-pub struct Variable(u32);
-#[derive(Copy, Clone, Debug)]
-struct Temporary(u32);
+pub struct Local(u32);
 #[derive(Copy, Clone, Debug)]
 struct Parameter(u32);
 
@@ -41,8 +40,8 @@ impl<'t> Function<'t> {
             }
             let blk = ret.get_block(&mut START_BLOCK);
             for i in 0..input_types.len() as u32 {
-                blk.statements.push(Statement(Lvalue::Variable(Variable(i)),
-                    Value::leaf(ValueLeaf::Parameter(Parameter(i)))))
+                blk.statements.push(Statement(Lvalue::Local(Local(i)),
+                    Value(ValueKind::Parameter(Parameter(i)))))
             }
         }
         END_BLOCK.terminate(&mut ret, Terminator::Return);
@@ -53,45 +52,39 @@ impl<'t> Function<'t> {
         START_BLOCK
     }
 
-    fn new_block(&mut self, expr: Lvalue<'t>, term: Terminator<'t>) -> Block {
+    fn new_block(&mut self, expr: Lvalue, term: Terminator) -> Block {
         self.blocks.push(BlockData::new(expr, term));
         Block(self.blocks.len() - 1)
     }
-    fn new_tmp(&mut self, ty: Type<'t>) -> Temporary {
-        self.temporaries.push(ty);
-        Temporary(self.temporaries.len() as u32 - 1)
-    }
-    pub fn new_local(&mut self, ty: Type<'t>) -> Variable {
+    pub fn new_local(&mut self, ty: Type<'t>) -> Local {
+        assert!(self.locals.len() < u32::max_value() as usize);
         self.locals.push(ty);
-        Variable(self.locals.len() as u32 - 1)
+        Local(self.locals.len() as u32 - 1)
     }
-    pub fn get_param(&mut self, n: u32) -> Variable {
+    pub fn get_param_local(&mut self, n: u32) -> Local {
         assert!(n < self.ty.input().len() as u32);
-        Variable(n)
+        Local(n)
     }
 
-    fn get_block(&mut self, blk: &mut Block) -> &mut BlockData<'t> {
+    fn get_block(&mut self, blk: &mut Block) -> &mut BlockData {
         &mut self.blocks[blk.0 as usize]
     }
-    fn get_tmp_ty(&self, tmp: &Temporary) -> Type<'t> {
-        self.temporaries[tmp.0 as usize]
-    }
-    fn get_par_ty(&self, par: &Parameter) -> Type<'t> {
+    fn get_param_ty(&self, par: Parameter) -> Type<'t> {
         self.ty.input()[par.0 as usize]
     }
-    fn get_local_ty(&self, var: &Variable) -> Type<'t> {
+    fn get_local_ty(&self, var: Local) -> Type<'t> {
         self.locals[var.0 as usize]
     }
 
-    fn get_leaf(&mut self, mir: &Mir<'t>, value: Value<'t>, block: &mut Block,
-            fn_types: &HashMap<String, ty::Function<'t>>) -> ValueLeaf<'t> {
-        if let ValueKind::Leaf(leaf) = value.0 {
-            leaf
+    fn flatten(&mut self, value: Value, mir: &Mir<'t>, block: &mut Block,
+            fn_types: &HashMap<String, ty::Function<'t>>) -> Local {
+        if let ValueKind::Lvalue(Lvalue::Local(local)) = value.0 {
+            local
         } else {
             let ty = value.ty(mir, self, fn_types);
-            let tmp = self.new_tmp(ty);
-            block.add_stmt(Lvalue::Temporary(tmp), value, self);
-            ValueLeaf::Temporary(tmp)
+            let loc = self.new_local(ty);
+            block.add_stmt(Lvalue::Local(loc), value, self);
+            loc
         }
     }
 
@@ -106,7 +99,6 @@ struct LlFunction<'t> {
     raw: llvm::Value,
     builder: llvm::Builder,
     ret_ptr: llvm::Value,
-    temporaries: Vec<llvm::Value>,
     locals: Vec<llvm::Value>,
     blocks: Vec<llvm::BasicBlock>,
 }
@@ -114,64 +106,49 @@ struct LlFunction<'t> {
 impl<'t> LlFunction<'t> {
     fn build(mir: &Mir<'t>, mirfunc: Function<'t>, llfunc: llvm::Value,
             funcs: &HashMap<String, (llvm::Value, Type<'t>)>) {
-        unsafe {
-            let builder = llvm::Builder::new();
-            let mut blocks = Vec::new();
-            for i in 0..mirfunc.blocks.len() {
-                blocks.push(llvm::BasicBlock::append(llfunc, i as u32));
+        let builder = llvm::Builder::new();
+        let mut blocks = Vec::new();
+        for i in 0..mirfunc.blocks.len() {
+            blocks.push(llvm::BasicBlock::append(llfunc, i as u32));
+        }
+
+        builder.position_at_end(blocks[0]);
+
+        let mut locals = Vec::new();
+        for mir_local in &mirfunc.locals {
+            locals.push(
+                builder.build_alloca(
+                    llvm::get_type(&mir.target_data, *mir_local), "var"));
+        }
+
+        let ret_ptr = builder.build_alloca(
+            llvm::get_type(&mir.target_data, mirfunc.ty.output()), "ret");
+
+        let mut self_ = LlFunction {
+            mir: mirfunc,
+            raw: llfunc,
+            builder: builder,
+            ret_ptr: ret_ptr,
+            locals: locals,
+            blocks: blocks,
+        };
+
+        let mut i = self_.mir.blocks.len();
+        while let Some(blk) = self_.mir.blocks.pop() {
+            i -= 1;
+            self_.builder.position_at_end(self_.blocks[i]);
+            for stmt in blk.statements {
+                stmt.to_llvm(mir, &mut self_, funcs);
             }
-
-            builder.position_at_end(blocks[0]);
-
-            let mut tmps = Vec::new();
-            for mir_tmp in &mirfunc.temporaries {
-                tmps.push(
-                    builder.build_alloca(
-                        llvm::get_type(&mir.target_data, *mir_tmp), "tmp"));
-            }
-            let mut locals = Vec::new();
-            for mir_local in &mirfunc.locals {
-                locals.push(
-                    builder.build_alloca(
-                        llvm::get_type(&mir.target_data, *mir_local), "var"));
-            }
-
-            let ret_ptr = builder.build_alloca(
-                llvm::get_type(&mir.target_data, mirfunc.ty.output()), "ret");
-
-            let mut self_ = LlFunction {
-                mir: mirfunc,
-                raw: llfunc,
-                builder: builder,
-                ret_ptr: ret_ptr,
-                temporaries: tmps,
-                locals: locals,
-                blocks: blocks,
-            };
-
-            let mut i = self_.mir.blocks.len();
-            while let Some(blk) = self_.mir.blocks.pop() {
-                i -= 1;
-                self_.builder.position_at_end(self_.blocks[i]);
-                for stmt in blk.statements {
-                    stmt.to_llvm(mir, &mut self_, funcs);
-                }
-                blk.terminator.to_llvm(mir, &self_);
-            }
+            blk.terminator.to_llvm(mir, &self_);
         }
     }
 
 
-    fn get_tmp_ptr(&self, tmp: &Temporary) -> llvm::Value {
-        self.temporaries[tmp.0 as usize]
-    }
-    fn get_tmp_value(&self, tmp: &Temporary) -> llvm::Value {
-        self.builder.build_load(self.temporaries[tmp.0 as usize])
-    }
-    fn get_local_ptr(&self, var: &Variable) -> llvm::Value {
+    fn get_local_ptr(&self, var: Local) -> llvm::Value {
         self.locals[var.0 as usize]
     }
-    fn get_local_value(&self, var: &Variable) -> llvm::Value {
+    fn get_local_value(&self, var: Local) -> llvm::Value {
         self.builder.build_load(self.locals[var.0 as usize])
     }
 
@@ -182,25 +159,27 @@ impl<'t> LlFunction<'t> {
 
 // TODO(ubsan): get rid of Clone, switch to Clone and CloneData implementation
 #[derive(Clone, Debug)]
-enum Literal<'t> {
+enum Literal {
     Int {
         value: u64,
-        ty: Type<'t>,
+        signed: bool,
+        ty: ty::Int,
     },
     Bool(bool),
-    Tuple(Vec<ValueLeaf<'t>>),
+    Tuple(Vec<Local>),
 }
 
-impl<'t> Literal<'t> {
-    unsafe fn to_llvm(self, mir: &Mir<'t>, function: &LlFunction<'t>)
+impl Literal {
+    fn to_llvm<'t>(self, function: &LlFunction<'t>)
             -> llvm::Value {
         match self {
             Literal::Int {
                 value,
                 ty,
+                ..
             } => {
                 llvm::Value::const_int(
-                    llvm::get_type(&mir.target_data, ty), value)
+                    llvm::get_int_type(ty), value)
             }
             Literal::Bool(value) => {
                 llvm::Value::const_bool(value)
@@ -208,24 +187,24 @@ impl<'t> Literal<'t> {
             Literal::Tuple(v) => {
                 let mut llvm_v = Vec::new();
                 for el in v {
-                    llvm_v.push(el.to_llvm(mir, function));
+                    llvm_v.push(function.get_local_value(el));
                 }
                 llvm::Value::const_struct(&llvm_v)
             }
         }
     }
 
-    fn ty(&self, mir: &Mir<'t>, function: &Function<'t>) -> Type<'t> {
+    fn ty<'t>(&self, mir: &Mir<'t>, function: &Function<'t>) -> Type<'t> {
         match *self {
             Literal::Int {
                 ty,
                 ..
-            } => ty,
+            } => Type::sint(ty, mir.ctxt),
             Literal::Bool(_) => Type::bool(mir.ctxt),
             Literal::Tuple(ref v) => {
                 let mut type_v = Vec::new();
                 for el in v {
-                    type_v.push(el.ty(mir, function));
+                    type_v.push(function.get_local_ty(*el));
                 }
                 Type::tuple(type_v, mir.ctxt)
             }
@@ -234,289 +213,249 @@ impl<'t> Literal<'t> {
 }
 
 #[derive(Clone, Debug)]
-enum ValueLeaf<'t> {
-    Literal(Literal<'t>),
+enum ValueKind {
+    Literal(Literal),
     Parameter(Parameter),
-    Variable(Variable),
-    Temporary(Temporary),
-}
-
-impl<'t> ValueLeaf<'t> {
-    fn ty(&self, mir: &Mir<'t>, function: &Function<'t>) -> Type<'t> {
-        match *self {
-            ValueLeaf::Literal(ref inner) => inner.ty(mir, function),
-            ValueLeaf::Temporary(ref tmp) => function.get_tmp_ty(tmp),
-            ValueLeaf::Parameter(ref par) => function.get_par_ty(par),
-            ValueLeaf::Variable(ref var) => function.get_local_ty(var),
-        }
-    }
-
-    unsafe fn to_llvm(self, mir: &Mir<'t>, function: &LlFunction<'t>)
-            -> llvm::Value {
-        match self {
-            ValueLeaf::Literal(inner) => {
-                inner.to_llvm(mir, function)
-            }
-            ValueLeaf::Temporary(tmp) => {
-                function.get_tmp_value(&tmp)
-            }
-            ValueLeaf::Parameter(par) => {
-                llvm::Value::get_param(function.raw, par.0)
-            }
-            ValueLeaf::Variable(var) => {
-                function.get_local_value(&var)
-            }
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-enum ValueKind<'t> {
-    Leaf(ValueLeaf<'t>),
+    Lvalue(Lvalue),
 
     // -- unops --
-    Pos(ValueLeaf<'t>),
-    Neg(ValueLeaf<'t>),
-    Not(ValueLeaf<'t>),
+    Pos(Local),
+    Neg(Local),
+    Not(Local),
 
-    Ref(ValueLeaf<'t>),
-    Deref(ValueLeaf<'t>),
+    Ref(Local),
 
     // -- binops --
-    Add(ValueLeaf<'t>, ValueLeaf<'t>),
-    Sub(ValueLeaf<'t>, ValueLeaf<'t>),
-    Mul(ValueLeaf<'t>, ValueLeaf<'t>),
-    Div(ValueLeaf<'t>, ValueLeaf<'t>),
-    Rem(ValueLeaf<'t>, ValueLeaf<'t>),
-    And(ValueLeaf<'t>, ValueLeaf<'t>),
-    Xor(ValueLeaf<'t>, ValueLeaf<'t>),
-    Or(ValueLeaf<'t>, ValueLeaf<'t>),
-    Shl(ValueLeaf<'t>, ValueLeaf<'t>),
-    Shr(ValueLeaf<'t>, ValueLeaf<'t>),
+    Add(Local, Local),
+    Sub(Local, Local),
+    Mul(Local, Local),
+    Div(Local, Local),
+    Rem(Local, Local),
+    And(Local, Local),
+    Xor(Local, Local),
+    Or(Local, Local),
+    Shl(Local, Local),
+    Shr(Local, Local),
 
     // -- comparison --
-    Eq(ValueLeaf<'t>, ValueLeaf<'t>),
-    Neq(ValueLeaf<'t>, ValueLeaf<'t>),
-    Lt(ValueLeaf<'t>, ValueLeaf<'t>),
-    Lte(ValueLeaf<'t>, ValueLeaf<'t>),
-    Gt(ValueLeaf<'t>, ValueLeaf<'t>),
-    Gte(ValueLeaf<'t>, ValueLeaf<'t>),
+    Eq(Local, Local),
+    Neq(Local, Local),
+    Lt(Local, Local),
+    Lte(Local, Local),
+    Gt(Local, Local),
+    Gte(Local, Local),
 
     // -- other --
     Call {
         callee: String,
-        args: Vec<ValueLeaf<'t>>,
+        args: Vec<Local>,
     },
 }
 
 #[derive(Debug)]
-pub struct Value<'t>(ValueKind<'t>);
+pub struct Value(ValueKind);
 
 // --- CONSTRUCTORS ---
-impl<'t> Value<'t> {
+impl Value {
     // -- leaves --
     #[inline(always)]
-    pub fn const_int(value: u64, ty: Type<'t>) -> Self {
-        Value::leaf(
-            ValueLeaf::Literal(Literal::Int {
+    pub fn int_literal(value: u64, ty: ty::Int, signed: bool) -> Self {
+        Value(ValueKind::Literal(
+            Literal::Int {
                 value: value,
+                signed: signed,
                 ty: ty,
-            }
-        ))
+            }))
     }
     #[inline(always)]
-    pub fn const_bool(value: bool) -> Self {
-        Value::leaf(ValueLeaf::Literal(Literal::Bool(value)))
+    pub fn bool_literal(value: bool) -> Self {
+        Value(ValueKind::Literal(Literal::Bool(value)))
     }
-    #[inline(always)]
-    pub fn tuple_literal(v: Vec<Value<'t>>, mir: &Mir<'t>,
+    pub fn tuple_literal<'t>(v: Vec<Value>, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
-            fn_types: &HashMap<String, ty::Function<'t>>) -> Value<'t> {
+            fn_types: &HashMap<String, ty::Function<'t>>) -> Value {
         let mut leaf_v = Vec::new();
         for el in v {
-            leaf_v.push(function.get_leaf(mir, el, block, fn_types))
+            leaf_v.push(function.flatten(el, mir, block, fn_types))
         }
-        Value::leaf(ValueLeaf::Literal(Literal::Tuple(leaf_v)))
+        Value(ValueKind::Literal(Literal::Tuple(leaf_v)))
     }
     #[inline(always)]
-    pub fn unit_literal() -> Value<'t> {
-        Value::leaf(ValueLeaf::Literal(Literal::Tuple(vec![])))
-    }
-    #[inline(always)]
-    pub fn const_unit() -> Value<'t> {
-        Value::leaf(ValueLeaf::Literal(Literal::Tuple(vec![])))
+    pub fn unit_literal() -> Value {
+        Value(ValueKind::Literal(Literal::Tuple(vec![])))
     }
 
+    #[inline(always)]
     pub fn param(arg_num: u32, function: &mut Function) -> Self {
         assert!(arg_num < function.ty.input().len() as u32);
-        Value::leaf(ValueLeaf::Variable(Variable(arg_num)))
+        Value::local(function.get_param_local(arg_num))
     }
-
-    pub fn local(var: Variable) -> Self {
-        Value::leaf(ValueLeaf::Variable(var))
-    }
-
-
     #[inline(always)]
-    fn leaf(leaf: ValueLeaf<'t>) -> Self {
-        Value(ValueKind::Leaf(leaf))
+    pub fn local(local: Local) -> Self {
+        Value::lvalue(Lvalue::Local(local))
+    }
+    #[inline(always)]
+    fn lvalue(lvalue: Lvalue) -> Self {
+        Value(ValueKind::Lvalue(lvalue))
     }
 
     // -- unops --
-    pub fn pos(inner: Self, mir: &Mir<'t>, function: &mut Function<'t>,
+    pub fn pos<'t>(inner: Self, mir: &Mir<'t>, function: &mut Function<'t>,
             block: &mut Block, fn_types: &HashMap<String, ty::Function<'t>>)
             -> Self {
-        Value(ValueKind::Pos(function.get_leaf(mir, inner, block, fn_types)))
+        Value(ValueKind::Pos(function.flatten(inner, mir, block, fn_types)))
     }
-    pub fn neg(inner: Self, mir: &Mir<'t>, function: &mut Function<'t>,
+    pub fn neg<'t>(inner: Self, mir: &Mir<'t>, function: &mut Function<'t>,
             block: &mut Block, fn_types: &HashMap<String, ty::Function<'t>>)
             -> Self {
-        Value(ValueKind::Neg(function.get_leaf(mir, inner, block, fn_types)))
+        Value(ValueKind::Neg(function.flatten(inner, mir, block, fn_types)))
     }
-    pub fn not(inner: Self, mir: &Mir<'t>, function: &mut Function<'t>,
+    pub fn not<'t>(inner: Self, mir: &Mir<'t>, function: &mut Function<'t>,
             block: &mut Block, fn_types: &HashMap<String, ty::Function<'t>>)
             -> Self {
-        Value(ValueKind::Not(function.get_leaf(mir, inner, block, fn_types)))
+        Value(ValueKind::Not(function.flatten(inner, mir, block, fn_types)))
     }
-    pub fn ref_(inner: Self, mir: &Mir<'t>, function: &mut Function<'t>, block: &mut Block,
-            fn_types: &HashMap<String, ty::Function<'t>>)
+    pub fn ref_<'t>(inner: Self, mir: &Mir<'t>, function: &mut Function<'t>,
+            block: &mut Block, fn_types: &HashMap<String, ty::Function<'t>>)
             -> Self {
         let inner_ty = inner.ty(mir, function, fn_types);
-        let ptr = function.new_tmp(Type::ref_(inner_ty, mir.ctxt));
-        block.write_ref(Lvalue::Temporary(ptr),
-            inner, mir, function, fn_types);
-        Value::leaf(ValueLeaf::Temporary(ptr))
+        let inner = function.flatten(inner, mir, block, fn_types);
+        let ptr = function.new_local(Type::ref_(inner_ty, mir.ctxt));
+        block.add_stmt(Lvalue::Local(ptr), Value(ValueKind::Ref(inner)),
+            function);
+        Value::local(ptr)
     }
 
-    pub fn deref(inner: Self, mir: &Mir<'t>, function: &mut Function<'t>,
+    pub fn deref<'t>(inner: Self, mir: &Mir<'t>, function: &mut Function<'t>,
             block: &mut Block, fn_types: &HashMap<String, ty::Function<'t>>)
             -> Self {
-        Value(ValueKind::Deref(function.get_leaf(mir, inner, block, fn_types)))
+        let ptr = function.flatten(inner, mir, block, fn_types);
+        Value::lvalue(Lvalue::Deref(ptr))
     }
 
     // -- binops --
-    pub fn add(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn add<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         Value(ValueKind::Add(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
-    pub fn sub(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn sub<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         Value(ValueKind::Sub(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
-    pub fn mul(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn mul<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         Value(ValueKind::Mul(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
-    pub fn div(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn div<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         Value(ValueKind::Div(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
-    pub fn rem(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn rem<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         Value(ValueKind::Rem(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
-    pub fn and(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn and<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         Value(ValueKind::And(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
-    pub fn xor(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn xor<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         Value(ValueKind::Xor(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
-    pub fn or(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn or<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         Value(ValueKind::Or(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
-    pub fn shl(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn shl<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         Value(ValueKind::Shl(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
-    pub fn shr(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn shr<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         Value(ValueKind::Shr(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
 
     // -- comparisons --
-    pub fn eq(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn eq<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         Value(ValueKind::Eq(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
-    pub fn neq(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn neq<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         Value(ValueKind::Neq(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
-    pub fn lt(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn lt<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         Value(ValueKind::Lt(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
-    pub fn lte(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn lte<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         Value(ValueKind::Lte(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
-    pub fn gt(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn gt<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>)
             -> Self {
         Value(ValueKind::Gt(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
-    pub fn gte(lhs: Self, rhs: Self, mir: &Mir<'t>,
+    pub fn gte<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         Value(ValueKind::Gte(
-            function.get_leaf(mir, lhs, block, fn_types),
-            function.get_leaf(mir, rhs, block, fn_types)))
+            function.flatten(lhs, mir, block, fn_types),
+            function.flatten(rhs, mir, block, fn_types)))
     }
 
     // -- misc --
-    pub fn call(callee: String, args: Vec<Self>, mir: &Mir<'t>,
+    pub fn call<'t>(callee: String, args: Vec<Self>, mir: &Mir<'t>,
             function: &mut Function<'t>, block: &mut Block,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
         let args = args.into_iter().map(|v|
-            function.get_leaf(mir, v, block, fn_types)).collect();
+            function.flatten(v, mir, block, fn_types)).collect();
         Value(ValueKind::Call {
             callee: callee,
             args: args,
@@ -524,44 +463,38 @@ impl<'t> Value<'t> {
     }
 }
 
-impl<'t> Value<'t> {
-    fn ty(&self, mir: &Mir<'t>, function: &Function<'t>,
+impl Value {
+    fn ty<'t>(&self, mir: &Mir<'t>, function: &Function<'t>,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Type<'t> {
         match self.0 {
-            ValueKind::Leaf(ref v) => v.ty(mir, function),
+            ValueKind::Literal(ref lit) => lit.ty(mir, function),
+            ValueKind::Parameter(par) => function.get_param_ty(par),
+            ValueKind::Lvalue(ref lv) => lv.ty(function),
 
-            ValueKind::Pos(ref inner) | ValueKind::Neg(ref inner)
-            | ValueKind::Not(ref inner) => inner.ty(mir, function),
+            ValueKind::Pos(inner) | ValueKind::Neg(inner)
+            | ValueKind::Not(inner) => function.get_local_ty(inner),
 
-            ValueKind::Ref(ref inner) =>
-                Type::ref_(inner.ty(mir, function), mir.ctxt),
-            ValueKind::Deref(ref inner) => {
-                if let TypeVariant::Reference(inner) =
-                        *inner.ty(mir, function).0 {
-                    inner
-                } else {
-                    panic!("Deref of a non-ref type: {:?}", inner)
-                }
-            }
+            ValueKind::Ref(inner) =>
+                Type::ref_(function.get_local_ty(inner), mir.ctxt),
 
-            ValueKind::Add(ref lhs, ref rhs)
-            | ValueKind::Sub(ref lhs, ref rhs)
-            | ValueKind::Mul(ref lhs, ref rhs)
-            | ValueKind::Div(ref lhs, ref rhs)
-            | ValueKind::Rem(ref lhs, ref rhs)
-            | ValueKind::And(ref lhs, ref rhs)
-            | ValueKind::Xor(ref lhs, ref rhs)
-            | ValueKind::Or(ref lhs, ref rhs)
+            ValueKind::Add(lhs, rhs)
+            | ValueKind::Sub(lhs, rhs)
+            | ValueKind::Mul(lhs, rhs)
+            | ValueKind::Div(lhs, rhs)
+            | ValueKind::Rem(lhs, rhs)
+            | ValueKind::And(lhs, rhs)
+            | ValueKind::Xor(lhs, rhs)
+            | ValueKind::Or(lhs, rhs)
             => {
-                let lhs_ty = lhs.ty(mir, function);
-                assert_eq!(lhs_ty, rhs.ty(mir, function));
+                let lhs_ty = function.get_local_ty(lhs);
+                assert_eq!(lhs_ty, function.get_local_ty(rhs));
                 lhs_ty
             }
 
-            ValueKind::Shl(ref lhs, _)
-            | ValueKind::Shr(ref lhs, _)
+            ValueKind::Shl(lhs, _)
+            | ValueKind::Shr(lhs, _)
             => {
-                lhs.ty(mir, function)
+                function.get_local_ty(lhs)
             }
 
             ValueKind::Eq(_, _) | ValueKind::Neq(_, _) | ValueKind::Lt(_, _)
@@ -578,16 +511,23 @@ impl<'t> Value<'t> {
         }
     }
 
-    unsafe fn to_llvm(self, mir: &Mir<'t>, function: &mut LlFunction<'t>,
+    fn to_llvm<'t>(self, mir: &Mir<'t>, function: &mut LlFunction<'t>,
             funcs: &HashMap<String, (llvm::Value, Type<'t>)>)
             -> llvm::Value {
         match self.0 {
-            ValueKind::Leaf(v) => {
-                v.to_llvm(mir, function)
+            ValueKind::Literal(lit) => {
+                lit.to_llvm(function)
+            }
+            ValueKind::Parameter(par) => {
+                llvm::Value::get_param(function.raw, par.0)
+            }
+            ValueKind::Lvalue(lv) => {
+                let ptr = lv.to_llvm(function);
+                function.builder.build_load(ptr)
             }
             ValueKind::Pos(inner) => {
-                let ty = inner.ty(mir, &function.mir);
-                let llinner = inner.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(inner);
+                let llinner = function.get_local_value(inner);
                 match *ty.0 {
                     TypeVariant::SInt(_) | TypeVariant::UInt(_) => llinner,
                     _ => panic!("ICE: {} can't be used in unary +", ty),
@@ -595,8 +535,8 @@ impl<'t> Value<'t> {
             }
             ValueKind::Neg(inner) => {
                 // TODO(ubsan): check types
-                let ty = inner.ty(mir, &function.mir);
-                let llinner = inner.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(inner);
+                let llinner = function.get_local_value(inner);
                 match *ty.0 {
                     TypeVariant::SInt(_) =>
                         function.builder.build_neg(llinner),
@@ -604,8 +544,8 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::Not(inner) => {
-                let ty = inner.ty(mir, &function.mir);
-                let llinner = inner.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(inner);
+                let llinner = function.get_local_value(inner);
                 match *ty.0 {
                     TypeVariant::SInt(_) | TypeVariant::UInt(_)
                     | TypeVariant::Bool =>
@@ -613,23 +553,11 @@ impl<'t> Value<'t> {
                     _ => panic!("ICE: {} can't be used in unary !", ty),
                 }
             }
-            ValueKind::Ref(inner) => {
-                match inner {
-                    ValueLeaf::Variable(v) => function.get_local_ptr(&v),
-                    ValueLeaf::Temporary(t) => function.get_tmp_ptr(&t),
-                    ValueLeaf::Parameter(_) =>
-                        panic!("Attempted to take reference of parameter"),
-                    _ => panic!("Attempted to take reference of const"),
-                }
-            }
-            ValueKind::Deref(inner) => {
-                let llinner = inner.to_llvm(mir, function);
-                function.builder.build_load(llinner)
-            }
+            ValueKind::Ref(inner) => function.get_local_ptr(inner),
             ValueKind::Add(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) | TypeVariant::UInt(_) =>
                         function.builder.build_add(lhs, rhs),
@@ -637,9 +565,9 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::Sub(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) | TypeVariant::UInt(_) =>
                         function.builder.build_sub(lhs, rhs),
@@ -647,9 +575,9 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::Mul(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) | TypeVariant::UInt(_) =>
                         function.builder.build_mul(lhs, rhs),
@@ -657,9 +585,9 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::Div(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) =>
                         function.builder.build_sdiv(lhs, rhs),
@@ -669,9 +597,9 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::Rem(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) =>
                         function.builder.build_srem(lhs, rhs),
@@ -681,9 +609,9 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::And(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) | TypeVariant::UInt(_)
                     | TypeVariant::Bool =>
@@ -692,9 +620,9 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::Xor(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) | TypeVariant::UInt(_)
                     | TypeVariant::Bool =>
@@ -703,9 +631,9 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::Or(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) | TypeVariant::UInt(_)
                     | TypeVariant::Bool =>
@@ -714,9 +642,9 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::Shl(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) | TypeVariant::UInt(_) =>
                         function.builder.build_shl(lhs, rhs),
@@ -724,9 +652,9 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::Shr(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) =>
                         function.builder.build_ashr(lhs, rhs),
@@ -736,9 +664,9 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::Eq(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) | TypeVariant::UInt(_)
                     | TypeVariant::Bool =>
@@ -747,9 +675,9 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::Neq(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) | TypeVariant::UInt(_)
                     | TypeVariant::Bool =>
@@ -758,9 +686,9 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::Lt(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) =>
                         function.builder.build_icmp(llvm::IntSLT, lhs, rhs),
@@ -770,9 +698,9 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::Lte(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) =>
                         function.builder.build_icmp(llvm::IntSLE, lhs, rhs),
@@ -782,9 +710,9 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::Gt(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) =>
                         function.builder.build_icmp(llvm::IntSGT,
@@ -796,9 +724,9 @@ impl<'t> Value<'t> {
                 }
             }
             ValueKind::Gte(lhs, rhs) => {
-                let ty = lhs.ty(mir, &function.mir);
-                let lhs = lhs.to_llvm(mir, function);
-                let rhs = rhs.to_llvm(mir, function);
+                let ty = function.mir.get_local_ty(lhs);
+                let lhs = function.get_local_value(lhs);
+                let rhs = function.get_local_value(rhs);
                 match *ty.0 {
                     TypeVariant::SInt(_) =>
                         function.builder.build_icmp(llvm::IntSGE,
@@ -814,7 +742,7 @@ impl<'t> Value<'t> {
                 args,
             } => {
                 let args = args.into_iter().map(|a|
-                    a.to_llvm(mir, function)).collect::<Vec<_>>();
+                    function.get_local_value(a)).collect::<Vec<_>>();
                 let (callee, output) = *funcs.get(&callee).unwrap();
                 let llret = function.builder.build_call(callee, &args);
 
@@ -828,36 +756,64 @@ impl<'t> Value<'t> {
     }
 }
 
-#[derive(Clone, Debug)]
-enum Lvalue<'t> {
-    Variable(Variable),
-    Temporary(Temporary),
-    Deref(ValueLeaf<'t>),
+#[derive(Copy, Clone, Debug)]
+enum Lvalue {
+    Local(Local),
+    Deref(Local),
     Return,
 }
 
-#[derive(Debug)]
-struct Statement<'t>(Lvalue<'t>, Value<'t>);
+impl Lvalue {
+    fn ty<'t>(&self, function: &Function<'t>) -> Type<'t> {
+        match *self {
+            Lvalue::Local(l) => function.get_local_ty(l),
+            Lvalue::Deref(l) => {
+                let outer_ty = function.get_local_ty(l);
+                if let TypeVariant::Reference(inner) = *outer_ty.0 {
+                    inner
+                } else {
+                    panic!("ICE: Attempt to take type of a deref of {:?}",
+                        outer_ty);
+                }
+            }
+            Lvalue::Return => {
+                function.ty.output()
+            }
+        }
+    }
 
-impl<'t> Statement<'t> {
-    unsafe fn to_llvm(self, mir: &Mir<'t>, function: &mut LlFunction<'t>,
+    fn to_llvm(self, function: &LlFunction) -> llvm::Value {
+        match self {
+            Lvalue::Local(loc) => {
+                function.get_local_ptr(loc)
+            }
+            Lvalue::Deref(loc) => {
+                function.get_local_value(loc)
+            }
+            Lvalue::Return => {
+                function.ret_ptr
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Statement(Lvalue, Value);
+
+impl Statement {
+    fn to_llvm<'t>(self, mir: &Mir<'t>, function: &mut LlFunction<'t>,
             funcs: &HashMap<String, (llvm::Value, Type<'t>)>) {
-        let dst = match self.0 {
-            Lvalue::Return => function.ret_ptr,
-            Lvalue::Temporary(tmp) => function.get_tmp_ptr(&tmp),
-            Lvalue::Variable(var) => function.get_local_ptr(&var),
-            Lvalue::Deref(ptr) => ptr.to_llvm(mir, function),
-        };
+        let dst = (self.0).to_llvm(function);
         let src = (self.1).to_llvm(mir, function, funcs);
         function.builder.build_store(dst, src);
     }
 }
 
 #[derive(Debug)]
-enum Terminator<'t> {
+enum Terminator {
     Goto(Block),
     If {
-        cond: ValueLeaf<'t>,
+        cond: Local,
         then_blk: Block,
         else_blk: Block,
     },
@@ -865,8 +821,8 @@ enum Terminator<'t> {
     Return,
 }
 
-impl<'t> Terminator<'t> {
-    unsafe fn to_llvm(self, mir: &Mir<'t>, function: &LlFunction<'t>) {
+impl Terminator {
+    fn to_llvm<'t>(self, mir: &Mir<'t>, function: &LlFunction<'t>) {
         match self {
             Terminator::Goto(mut b) => {
                 function.builder.build_br(function.get_block(&mut b));
@@ -876,7 +832,7 @@ impl<'t> Terminator<'t> {
                 mut then_blk,
                 mut else_blk,
             } => {
-                let cond = cond.to_llvm(mir, function);
+                let cond = function.get_local_value(cond);
                 function.builder.build_cond_br(cond,
                     function.get_block(&mut then_blk),
                     function.get_block(&mut else_blk));
@@ -898,70 +854,46 @@ impl<'t> Terminator<'t> {
 pub struct Block(usize);
 
 impl Block {
-    pub fn write_to_var<'t>(&mut self, var: Variable, val: Value<'t>,
-            function: &mut Function<'t>) {
-        self.add_stmt(Lvalue::Variable(var), val, function)
+    pub fn set(&mut self, loc: Local, val: Value,
+            function: &mut Function) {
+        self.add_stmt(Lvalue::Local(loc), val, function)
     }
 
-    pub fn write_to_tmp<'t>(&mut self, val: Value<'t>,
+    pub fn store<'t>(&mut self, ptr: Value, val: Value,
             mir: &Mir<'t>, function: &mut Function<'t>,
-            fn_types: &HashMap<String, ty::Function<'t>>) -> Value<'t> {
+            fn_types: &HashMap<String, ty::Function<'t>>) {
+        let local = function.flatten(ptr, mir, self, fn_types);
+        self.add_stmt(Lvalue::Deref(local), val, function)
+    }
+
+    pub fn set_tmp<'t>(&mut self, val: Value,
+            mir: &Mir<'t>, function: &mut Function<'t>,
+            fn_types: &HashMap<String, ty::Function<'t>>) -> Value {
         let ty = val.ty(mir, function, fn_types);
-        let tmp = function.new_tmp(ty);
-        self.add_stmt(Lvalue::Temporary(tmp), val, function);
-        Value::leaf(ValueLeaf::Temporary(tmp))
+        let tmp = function.new_local(ty);
+        self.add_stmt(Lvalue::Local(tmp), val, function);
+        Value::local(tmp)
     }
 
-    pub fn write_to_ptr<'t>(&mut self, ptr: Value<'t>, val: Value<'t>,
-            mir: &Mir<'t>, function: &mut Function<'t>,
-            fn_types: &HashMap<String, ty::Function<'t>>) {
-        let leaf = function.get_leaf(mir, ptr, self, fn_types);
-        if let TypeVariant::Reference(_) = *leaf.ty(mir, function).0 {
-        } else {
-            panic!("writing to a not-pointer: {}", leaf.ty(mir, function))
-        }
-        self.add_stmt(Lvalue::Deref(leaf), val, function)
-    }
-
-    fn write_ref<'t>(&mut self, ptr: Lvalue<'t>, val: Value<'t>,
-            mir: &Mir<'t>, function: &mut Function<'t>,
-            fn_types: &HashMap<String, ty::Function<'t>>) {
-        let leaf = function.get_leaf(mir, val, self, fn_types);
-        let leaf = match leaf {
-            l @ ValueLeaf::Literal(_) => {
-                let ty = l.ty(mir, function);
-                let tmp = function.new_tmp(ty);
-                self.add_stmt(Lvalue::Temporary(tmp), Value::leaf(l),
-                    function);
-                ValueLeaf::Temporary(tmp)
-            }
-            ValueLeaf::Parameter(_) => {
-                panic!("ICE: Attempted to write_ref a parameter");
-            }
-            l @ ValueLeaf::Temporary(_) | l @ ValueLeaf::Variable(_) => l,
-        };
-        self.add_stmt(ptr, Value(ValueKind::Ref(leaf)), function);
-    }
-
-    fn add_stmt<'t>(&mut self, lvalue: Lvalue<'t>, value: Value<'t>,
-            function: &mut Function<'t>) {
+    fn add_stmt(&mut self, lvalue: Lvalue, value: Value,
+            function: &mut Function) {
         let blk = function.get_block(self);
         blk.statements.push(Statement(lvalue, value))
     }
 }
 // terminators
 impl Block {
-    pub fn if_else<'t>(mut self, ty: Type<'t>, cond: Value<'t>,
+    pub fn if_else<'t>(mut self, ty: Type<'t>, cond: Value,
             mir: &Mir<'t>, function: &mut Function<'t>,
             fn_types: &HashMap<String, ty::Function<'t>>)
-            -> (Block, Block, Block, Value<'t>) {
-        let cond = function.get_leaf(mir, cond, &mut self, fn_types);
-        let tmp = function.new_tmp(ty);
+            -> (Block, Block, Block, Value) {
+        let cond = function.flatten(cond, mir, &mut self, fn_types);
+        let tmp = function.new_local(ty);
 
-        let mut then = function.new_block(Lvalue::Temporary(tmp),
-            Terminator::Goto(Block(0)));
-        let mut else_ = function.new_block(Lvalue::Temporary(tmp),
-            Terminator::Goto(Block(0)));
+        let mut then = function.new_block(Lvalue::Local(tmp),
+            Terminator::Return);
+        let mut else_ = function.new_block(Lvalue::Local(tmp),
+            Terminator::Return);
         // terminator is not permanent
 
         let (expr, term) = {
@@ -972,7 +904,7 @@ impl Block {
                     then_blk: Block(then.0),
                     else_blk: Block(else_.0)
                 });
-            (blk.expr.clone(), term)
+            (blk.expr, term)
         };
         let join = function.new_block(expr, term);
 
@@ -985,38 +917,36 @@ impl Block {
             else_blk.terminator = Terminator::Goto(Block(join.0));
         }
 
-        (then, else_, join, Value(ValueKind::Leaf(ValueLeaf::Temporary(tmp))))
+        (then, else_, join, Value::local(tmp))
     }
 
-    pub fn early_ret<'t>(mut self, function: &mut Function<'t>,
-            value: Value<'t>) {
+    pub fn early_ret(mut self, function: &mut Function, value: Value) {
         let blk = function.get_block(&mut self);
         blk.statements.push(Statement(Lvalue::Return, value));
         blk.terminator = Terminator::Goto(END_BLOCK);
     }
 
-    pub fn finish<'t>(mut self, function: &mut Function<'t>,
-            value: Value<'t>) {
+    pub fn finish(mut self, function: &mut Function, value: Value) {
         let blk = function.get_block(&mut self);
-        blk.statements.push(Statement(blk.expr.clone(), value));
+        blk.statements.push(Statement(blk.expr, value));
     }
 
-    fn terminate<'t>(&mut self, function: &mut Function<'t>,
-            terminator: Terminator<'t>) {
+    fn terminate(&mut self, function: &mut Function,
+            terminator: Terminator) {
         let blk = function.get_block(self);
         blk.terminator = terminator;
     }
 }
 
 #[derive(Debug)]
-struct BlockData<'t> {
-    expr: Lvalue<'t>,
-    statements: Vec<Statement<'t>>,
-    terminator: Terminator<'t>,
+struct BlockData {
+    expr: Lvalue,
+    statements: Vec<Statement>,
+    terminator: Terminator,
 }
 
-impl<'t> BlockData<'t> {
-    fn new(expr: Lvalue<'t>, term: Terminator<'t>) -> BlockData<'t> {
+impl BlockData {
+    fn new(expr: Lvalue, term: Terminator) -> BlockData {
         BlockData {
             expr: expr,
             statements: Vec::new(),

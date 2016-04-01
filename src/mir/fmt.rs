@@ -1,12 +1,11 @@
 use super::{Mir, Function, Terminator, Statement, Lvalue, Literal,
-    Value, ValueLeaf, ValueKind};
-use ty::TypeVariant;
+    Value, ValueKind, Local, Parameter};
 use std::fmt::{Debug, Display, Formatter, Error};
 
 impl<'t> Display for Function<'t> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         for (i, var) in self.locals.iter().enumerate() {
-            try!(writeln!(f, "  let var{}: {};", i, var));
+            try!(writeln!(f, "  let v{}: {};", i, var));
         }
         for (i, tmp) in self.temporaries.iter().enumerate() {
             try!(writeln!(f, "  let tmp{}: {};", i, tmp));
@@ -23,7 +22,7 @@ impl<'t> Display for Function<'t> {
     }
 }
 
-impl<'t> Display for Terminator<'t> {
+impl Display for Terminator {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         match *self {
             Terminator::Goto(ref b) => write!(f, "goto -> bb{}", b.0),
@@ -38,34 +37,34 @@ impl<'t> Display for Terminator<'t> {
     }
 }
 
-impl<'t> Display for Statement<'t> {
+impl Display for Statement {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         write!(f, "{} = {}", self.0, self.1)
     }
 }
 
-impl<'t> Display for Lvalue<'t> {
+impl Display for Lvalue {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         match *self {
             Lvalue::Return => write!(f, "return"),
-            Lvalue::Temporary(ref tmp) => write!(f, "tmp{}", tmp.0),
-            Lvalue::Variable(ref var) => write!(f, "var{}", var.0),
-            Lvalue::Deref(ref ptr) => write!(f, "(*{})", ptr),
+            Lvalue::Local(ref loc) => write!(f, "{}", loc),
+            Lvalue::Deref(ref ptr) => write!(f, "*{}", ptr),
         }
     }
 }
 
-impl<'t> Display for Literal<'t> {
+impl Display for Literal {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         match *self {
             Literal::Int {
-                ref ty,
-                ref value,
+                signed,
+                value,
+                ..
             } => {
-                match *ty.0 {
-                    TypeVariant::SInt(_) => write!(f, "{}", *value as i64),
-                    TypeVariant::UInt(_) => write!(f, "{}", *value as u64),
-                    _ => panic!("Non-integer int"),
+                if signed {
+                    write!(f, "{}", value as i64)
+                } else {
+                    write!(f, "{}", value as u64)
                 }
             }
             Literal::Bool(ref value) => write!(f, "{}", value),
@@ -84,26 +83,16 @@ impl<'t> Display for Literal<'t> {
     }
 }
 
-impl<'t> Display for ValueLeaf<'t> {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
-        match *self {
-            ValueLeaf::Literal(ref inner) => write!(f, "const {}", inner),
-            ValueLeaf::Temporary(ref tmp) => write!(f, "tmp{}", tmp.0),
-            ValueLeaf::Parameter(ref par) => write!(f, "arg{}", par.0),
-            ValueLeaf::Variable(ref var) => write!(f, "var{}", var.0),
-        }
-    }
-}
-
-impl<'t> Display for Value<'t> {
+impl Display for Value {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         match self.0 {
-            ValueKind::Leaf(ref v) => write!(f, "{}", v),
+            ValueKind::Literal(ref lit) => write!(f, "lit {}", lit),
+            ValueKind::Parameter(ref par) => write!(f, "{}", par),
+            ValueKind::Lvalue(ref lv) => write!(f, "{}", lv),
             ValueKind::Pos(ref inner) => write!(f, "Pos({})", inner),
             ValueKind::Neg(ref inner) => write!(f, "Neg({})", inner),
             ValueKind::Not(ref inner) => write!(f, "Not({})", inner),
             ValueKind::Ref(ref inner) => write!(f, "&{}", inner),
-            ValueKind::Deref(ref inner) => write!(f, "*{}", inner),
             ValueKind::Add(ref lhs, ref rhs)
                 => write!(f, "Add({}, {})", lhs, rhs),
             ValueKind::Sub(ref lhs, ref rhs)
@@ -152,6 +141,18 @@ impl<'t> Display for Value<'t> {
                 write!(f, ")")
             }
         }
+    }
+}
+
+impl Display for Local {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        write!(f, "v{}", self.0)
+    }
+}
+
+impl Display for Parameter {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        write!(f, "par{}", self.0)
     }
 }
 

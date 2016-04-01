@@ -806,16 +806,22 @@ impl<'t> Expr<'t> {
 // into mir
 impl<'t> Expr<'t> {
     pub fn translate(self, mir: &mir::Mir<'t>, function: &mut Function<'t>,
-            mut block: mir::Block, locals: &mut HashMap<String, mir::Variable>,
+            mut block: mir::Block, locals: &mut HashMap<String, mir::Local>,
             fn_types: &HashMap<String, ty::Function<'t>>)
-            -> (mir::Value<'t>, Option<mir::Block>) {
+            -> (mir::Value, Option<mir::Block>) {
         assert!(self.ty.is_final_type(), "not final type: {:?}", self);
         match self.kind {
             ExprKind::IntLiteral(n) => {
-                (mir::Value::const_int(n, self.ty), Some(block))
+                let (int_ty, signed) = match *self.ty.0 {
+                    TypeVariant::SInt(t) => (t, true),
+                    TypeVariant::UInt(t) => (t, false),
+                    _ => panic!("ICE: not a valid int literal type: {:?}",
+                        self.ty)
+                };
+                (mir::Value::int_literal(n, int_ty, signed), Some(block))
             }
             ExprKind::BoolLiteral(b) => {
-                (mir::Value::const_bool(b), Some(block))
+                (mir::Value::bool_literal(b), Some(block))
             }
             ExprKind::TupleLiteral(v) => {
                 let mut mir_v = Vec::new();
@@ -850,7 +856,7 @@ impl<'t> Expr<'t> {
                     (mir::Value::pos(inner, mir, &mut function.raw, &mut blk,
                         fn_types), Some(blk))
                 } else {
-                    (mir::Value::const_unit(), None)
+                    (mir::Value::unit_literal(), None)
                 }
             }
             ExprKind::Neg(e) => {
@@ -860,7 +866,7 @@ impl<'t> Expr<'t> {
                     (mir::Value::neg(inner, mir, &mut function.raw, &mut blk,
                         fn_types), Some(blk))
                 } else {
-                    (mir::Value::const_unit(), None)
+                    (mir::Value::unit_literal(), None)
                 }
             }
             ExprKind::Not(e) => {
@@ -870,7 +876,7 @@ impl<'t> Expr<'t> {
                     (mir::Value::not(inner, mir, &mut function.raw, &mut blk,
                         fn_types), Some(blk))
                 } else {
-                    (mir::Value::const_unit(), None)
+                    (mir::Value::unit_literal(), None)
                 }
             }
             ExprKind::Ref(e) => {
@@ -881,7 +887,7 @@ impl<'t> Expr<'t> {
                         fn_types),
                     Some(blk))
                 } else {
-                    (mir::Value::const_unit(), None)
+                    (mir::Value::unit_literal(), None)
                 }
             }
             ExprKind::Deref(e) => {
@@ -892,7 +898,7 @@ impl<'t> Expr<'t> {
                         fn_types),
                     Some(blk))
                 } else {
-                    (mir::Value::const_unit(), None)
+                    (mir::Value::unit_literal(), None)
                 }
             }
             ExprKind::Binop {
@@ -1018,7 +1024,7 @@ impl<'t> Expr<'t> {
                     if let Some(blk) = blk {
                         block = blk;
                     } else {
-                        return (mir::Value::const_unit(), None);
+                        return (mir::Value::unit_literal(), None);
                     }
                     mir_args.push(arg);
                 }
@@ -1037,7 +1043,7 @@ impl<'t> Expr<'t> {
                     blk.if_else(self.ty, cond,
                         mir, &mut function.raw, fn_types)
                 } else {
-                    return (mir::Value::const_unit(), None);
+                    return (mir::Value::unit_literal(), None);
                 };
 
                 let (expr, then_blk) = Self::translate_block(*then_value, mir,
@@ -1059,7 +1065,7 @@ impl<'t> Expr<'t> {
                 if let Some(block) = block {
                     block.early_ret(&mut function.raw, value);
                 }
-                (mir::Value::const_unit(), None)
+                (mir::Value::unit_literal(), None)
             }
             ExprKind::Assign {
                 dst,
@@ -1074,11 +1080,11 @@ impl<'t> Expr<'t> {
                                 *var
                             } else if let Some(&(num, _)) =
                                     function.args.get(&name) {
-                                function.raw.get_param(num as u32)
+                                function.raw.get_param_local(num as u32)
                             } else {
                                 panic!("ICE: unknown variable: {}", name)
                             };
-                            blk.write_to_var(var, value, &mut function.raw);
+                            blk.set(var, value, &mut function.raw);
                             Some(blk)
                         }
                         ExprKind::Deref(inner) => {
@@ -1086,15 +1092,15 @@ impl<'t> Expr<'t> {
                                 inner.translate(mir, function, blk, locals,
                                     fn_types);
                             if let Some(ref mut blk) = blk {
-                                blk.write_to_ptr(ptr, value,
-                                    mir, &mut function.raw, fn_types);
+                                blk.store(ptr, value, mir,
+                                    &mut function.raw, fn_types);
                             }
                             blk
                         }
                         e => panic!("ICE: unsupported lvalue: {:?}", e),
                     }
                 } else { None };
-                (mir::Value::const_unit(), blk)
+                (mir::Value::unit_literal(), blk)
             }
             ExprKind::Block(body) => {
                 Self::translate_block(*body, mir, function, block, locals,
@@ -1105,9 +1111,9 @@ impl<'t> Expr<'t> {
 
     pub fn translate_block(body: Block<'t>, mir: &mir::Mir<'t>,
             function: &mut Function<'t>, block: mir::Block,
-            locals: &mut HashMap<String, mir::Variable>,
+            locals: &mut HashMap<String, mir::Local>,
             fn_types: &HashMap<String, ty::Function<'t>>)
-            -> (mir::Value<'t>, Option<mir::Block>) {
+            -> (mir::Value, Option<mir::Block>) {
         let mut block = Some(block);
         for stmt in body.stmts {
             if let Some(blk) = block.take() {
@@ -1124,7 +1130,7 @@ impl<'t> Expr<'t> {
                                 value.translate(mir, function, blk,
                                     locals, fn_types);
                             if let Some(mut blk) = blk {
-                                blk.write_to_var(var, value,
+                                blk.set(var, value,
                                     &mut function.raw);
                                 block = Some(blk);
                             }
@@ -1136,7 +1142,7 @@ impl<'t> Expr<'t> {
                         let (value, blk) = e.translate(mir, function, blk,
                             locals, fn_types);
                         if let Some(mut blk) = blk {
-                            blk.write_to_tmp(value,
+                            blk.set_tmp(value,
                                 mir, &mut function.raw, fn_types);
                             block = Some(blk);
                         }
@@ -1150,10 +1156,10 @@ impl<'t> Expr<'t> {
             if let Some(blk) = block {
                 e.translate(mir, function, blk, locals, fn_types)
             } else {
-                (mir::Value::const_unit(), None)
+                (mir::Value::unit_literal(), None)
             }
         } else {
-            (mir::Value::const_unit(), block)
+            (mir::Value::unit_literal(), block)
         }
     }
 }

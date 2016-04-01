@@ -407,6 +407,12 @@ pub fn size_of_type(target_data: &TargetData, ty: ty::Type) -> u64 {
     }
 }
 
+pub fn get_int_type(ty: ty::Int) -> Type {
+    unsafe {
+        Type(LLVMIntType(ty.size()))
+    }
+}
+
 pub fn get_type(target_data: &TargetData, ty: ty::Type) -> Type {
     use ty::TypeVariant;
     unsafe {
