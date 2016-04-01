@@ -11,8 +11,8 @@ const END_BLOCK: Block = Block(1);
 #[derive(Debug)]
 pub struct Function<'t> {
     ty: ty::Function<'t>,
-    temporaries: Vec<Type<'t>>,
-    locals: Vec<Type<'t>>,
+    temporary_num: u32,
+    locals: Vec<(String, Type<'t>)>,
     blocks: Vec<BlockData>,
 }
 // TODO(ubsan): connect Variable and Temporary into one Local type
@@ -25,7 +25,7 @@ impl<'t> Function<'t> {
     pub fn new(ty: ty::Function<'t>) -> Self {
         let mut ret = Function {
             ty: ty,
-            temporaries: Vec::new(),
+            temporary_num: 0,
             locals: Vec::new(),
             blocks: Vec::new(),
         };
@@ -36,7 +36,7 @@ impl<'t> Function<'t> {
         let input_types = ret.ty.input().to_owned();
         {
             for ty in &input_types {
-                ret.new_local(*ty);
+                ret.new_local(*ty, None);
             }
             let blk = ret.get_block(&mut START_BLOCK);
             for i in 0..input_types.len() as u32 {
@@ -56,9 +56,21 @@ impl<'t> Function<'t> {
         self.blocks.push(BlockData::new(expr, term));
         Block(self.blocks.len() - 1)
     }
-    pub fn new_local(&mut self, ty: Type<'t>) -> Local {
+    pub fn new_local(&mut self, ty: Type<'t>, name: Option<String>) -> Local {
         assert!(self.locals.len() < u32::max_value() as usize);
-        self.locals.push(ty);
+        let name = match name {
+            Some(s) => if s == "" {
+                panic!("name of local cannot be empty string");
+            } else {
+                s
+            },
+            None => {
+                let s = format!("tmp{}", self.temporary_num);
+                self.temporary_num += 1;
+                s
+            }
+        };
+        self.locals.push((name, ty));
         Local(self.locals.len() as u32 - 1)
     }
     pub fn get_param_local(&mut self, n: u32) -> Local {
@@ -73,7 +85,10 @@ impl<'t> Function<'t> {
         self.ty.input()[par.0 as usize]
     }
     fn get_local_ty(&self, var: Local) -> Type<'t> {
-        self.locals[var.0 as usize]
+        self.locals[var.0 as usize].1
+    }
+    fn get_local_name(&self, var: Local) -> &str {
+        &self.locals[var.0 as usize].0
     }
 
     fn flatten(&mut self, value: Value, mir: &Mir<'t>, block: &mut Block,
@@ -82,7 +97,7 @@ impl<'t> Function<'t> {
             local
         } else {
             let ty = value.ty(mir, self, fn_types);
-            let loc = self.new_local(ty);
+            let loc = self.new_local(ty, None);
             block.add_stmt(Lvalue::Local(loc), value, self);
             loc
         }
@@ -118,7 +133,8 @@ impl<'t> LlFunction<'t> {
         for mir_local in &mirfunc.locals {
             locals.push(
                 builder.build_alloca(
-                    llvm::get_type(&mir.target_data, *mir_local), "var"));
+                    llvm::get_type(&mir.target_data, mir_local.1),
+                        &mir_local.0));
         }
 
         let ret_ptr = builder.build_alloca(
@@ -320,7 +336,7 @@ impl Value {
             -> Self {
         let inner_ty = inner.ty(mir, function, fn_types);
         let inner = function.flatten(inner, mir, block, fn_types);
-        let ptr = function.new_local(Type::ref_(inner_ty, mir.ctxt));
+        let ptr = function.new_local(Type::ref_(inner_ty, mir.ctxt), None);
         block.add_stmt(Lvalue::Local(ptr), Value(ValueKind::Ref(inner)),
             function);
         Value::local(ptr)
@@ -870,7 +886,7 @@ impl Block {
             mir: &Mir<'t>, function: &mut Function<'t>,
             fn_types: &HashMap<String, ty::Function<'t>>) -> Value {
         let ty = val.ty(mir, function, fn_types);
-        let tmp = function.new_local(ty);
+        let tmp = function.new_local(ty, None);
         self.add_stmt(Lvalue::Local(tmp), val, function);
         Value::local(tmp)
     }
@@ -888,7 +904,7 @@ impl Block {
             fn_types: &HashMap<String, ty::Function<'t>>)
             -> (Block, Block, Block, Value) {
         let cond = function.flatten(cond, mir, &mut self, fn_types);
-        let tmp = function.new_local(ty);
+        let tmp = function.new_local(ty, None);
 
         let mut then = function.new_block(Lvalue::Local(tmp),
             Terminator::Return);

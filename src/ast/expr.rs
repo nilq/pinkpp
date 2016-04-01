@@ -1123,7 +1123,8 @@ impl<'t> Expr<'t> {
                         ty,
                         value,
                     } => {
-                        let var = function.raw.new_local(ty);
+                        let var = function.raw.new_local(ty,
+                            Some(name.clone()));
                         locals.insert(name, var);
                         if let Some(value) = value {
                             let (value, blk) =
