@@ -1,9 +1,7 @@
 fn main() -> s32 {
-    let x = 0;
-    write_to(&x);
-    x
+  first((1, 0));
 }
 
-fn write_to(x: &s32) {
-    *x = 100;
+fn first(x: (s32, s32)) {
+  x.0
 }
