@@ -225,7 +225,7 @@ impl<'t> Expr<'t> {
         } => {
           ty.generate_inference_id(uf, ctxt);
           if let Some(ref mut v) = *value {
-            try!(v.unify_type(ctxt, *ty, uf, variables, function, functions));
+            v.unify_type(ctxt, *ty, uf, variables, function, functions)?;
           }
           variables.insert(name.to_owned(), *ty);
         }
@@ -233,33 +233,33 @@ impl<'t> Expr<'t> {
           kind: ExprKind::Return(_),
           ..
         }) => {
-          try!(e.unify_type(ctxt, Type::diverging(ctxt),
-            uf, variables, function, functions));
+          e.unify_type(ctxt, Type::diverging(ctxt),
+            uf, variables, function, functions)?;
           live_blk = false;
           break;
         }
         Stmt::Expr(ref mut e) => {
           let mut ty = Type::infer(ctxt);
           ty.generate_inference_id(uf, ctxt);
-          try!(e.unify_type(ctxt, ty, uf, variables, function, functions));
+          e.unify_type(ctxt, ty, uf, variables, function, functions)?;
         }
       }
     }
     if live_blk {
       match block.expr {
         Some(ref mut expr) => {
-          try!(expr.unify_type(ctxt, to_unify, uf, variables, function,
-            functions))
+          expr.unify_type(ctxt, to_unify, uf, variables, function,
+            functions)?
         },
         None => {
-          try!(uf.unify(to_unify, Type::unit(ctxt))
+          uf.unify(to_unify, Type::unit(ctxt))
             .map_err(|()| AstError::CouldNotUnify {
               first: Type::unit(ctxt),
               second: to_unify,
               function: function.name.clone(),
               compiler: fl!(),
             }
-          ))
+          )?
         },
       };
     }
@@ -331,8 +331,8 @@ impl<'t> Expr<'t> {
       }
       ExprKind::Pos(ref mut inner) | ExprKind::Neg(ref mut inner)
       | ExprKind::Not(ref mut inner) => {
-        try!(inner.unify_type(ctxt, to_unify,
-            uf, variables, function, functions));
+        inner.unify_type(ctxt, to_unify,
+            uf, variables, function, functions)?;
         let self_ty = self.ty;
         let inner_ty = inner.ty;
         uf.unify(self.ty, inner.ty).map_err(|()|
@@ -347,23 +347,23 @@ impl<'t> Expr<'t> {
       ExprKind::Ref(ref mut inner) => {
         let mut inner_ty = Type::infer(ctxt);
         inner_ty.generate_inference_id(uf, ctxt);
-        try!(inner.unify_type(ctxt, inner_ty,
-          uf, variables, function, functions));
+        inner.unify_type(ctxt, inner_ty,
+          uf, variables, function, functions)?;
         let ref_ty = Type::ref_(inner_ty, ctxt);
-        try!(uf.unify(to_unify, ref_ty).map_err(|()|
+        uf.unify(to_unify, ref_ty).map_err(|()|
           AstError::CouldNotUnify {
             first: to_unify,
             second: inner.ty,
             function: function.name.clone(),
             compiler: fl!(),
-        }));
-        try!(uf.unify(to_unify, ref_ty).map_err(|()|
+        })?;
+        uf.unify(to_unify, ref_ty).map_err(|()|
           AstError::CouldNotUnify {
             first: to_unify,
             second: ref_ty,
             function: function.name.clone(),
             compiler: fl!(),
-        }));
+        })?;
         let self_ty = self.ty;
         uf.unify(self.ty, ref_ty).map_err(|()|
           AstError::CouldNotUnify {
@@ -377,20 +377,20 @@ impl<'t> Expr<'t> {
         let mut outer_ty = Type::infer(ctxt);
         outer_ty.generate_inference_id(uf, ctxt);
         let self_ty = self.ty;
-        try!(uf.unify(self.ty, outer_ty).map_err(|()|
+        uf.unify(self.ty, outer_ty).map_err(|()|
           AstError::CouldNotUnify {
             first: self_ty,
             second: outer_ty,
             function: function.name.clone(),
             compiler: fl!(),
-        }));
-        try!(uf.unify(to_unify, outer_ty).map_err(|()|
+        })?;
+        uf.unify(to_unify, outer_ty).map_err(|()|
           AstError::CouldNotUnify {
             first: to_unify,
             second: outer_ty,
             function: function.name.clone(),
             compiler: fl!(),
-        }));
+        })?;
 
         let inner_ty = Type::ref_(outer_ty, ctxt);
         inner.unify_type(ctxt, inner_ty, uf, variables, function, functions)
@@ -412,8 +412,8 @@ impl<'t> Expr<'t> {
           | Operand::Shr | Operand::And
           | Operand::Xor | Operand::Or => {
             let ty = self.ty;
-            try!(lhs.unify_type(ctxt, self.ty,
-                uf, variables, function, functions));
+            lhs.unify_type(ctxt, self.ty,
+                uf, variables, function, functions)?;
             match rhs.unify_type(ctxt, lhs.ty,
                 uf, variables, function, functions) {
               Err(AstError::CouldNotUnify {
@@ -443,8 +443,8 @@ impl<'t> Expr<'t> {
           | Operand::GreaterThan | Operand::GreaterThanEquals => {
             self.ty = Type::bool(ctxt);
             rhs.ty.generate_inference_id(uf, ctxt);
-            try!(lhs.unify_type(ctxt, rhs.ty,
-              uf, variables, function, functions));
+            lhs.unify_type(ctxt, rhs.ty,
+              uf, variables, function, functions)?;
             match rhs.unify_type(ctxt, lhs.ty,
                 uf, variables, function, functions) {
               Err(AstError::CouldNotUnify {
@@ -533,8 +533,8 @@ impl<'t> Expr<'t> {
 
             self.ty = f.output();
             for (arg_ty, expr) in f.input().iter().zip(args) {
-              try!(expr.unify_type(ctxt, *arg_ty,
-                uf, variables, function, functions));
+              expr.unify_type(ctxt, *arg_ty,
+                uf, variables, function, functions)?;
             }
             let ty = self.ty;
             uf.unify(self.ty, to_unify).map_err(|()|
@@ -558,12 +558,12 @@ impl<'t> Expr<'t> {
         ref mut then_value,
         ref mut else_value,
       } => {
-        try!(condition.unify_type(ctxt, Type::bool(ctxt),
-          uf, variables, function, functions));
-        try!(Self::typeck_block(then_value, ctxt,
-          to_unify, uf, variables, function, functions));
-        try!(Self::typeck_block(else_value, ctxt,
-          to_unify, uf, variables, function, functions));
+        condition.unify_type(ctxt, Type::bool(ctxt),
+          uf, variables, function, functions)?;
+        Self::typeck_block(then_value, ctxt,
+          to_unify, uf, variables, function, functions)?;
+        Self::typeck_block(else_value, ctxt,
+          to_unify, uf, variables, function, functions)?;
         let ty = self.ty;
         uf.unify(self.ty, to_unify).map_err(|()|
           AstError::CouldNotUnify {
@@ -575,8 +575,8 @@ impl<'t> Expr<'t> {
         )
       }
       ExprKind::Block(ref mut blk) => {
-        try!(Self::typeck_block(blk, ctxt,
-          to_unify, uf, variables, function, functions));
+        Self::typeck_block(blk, ctxt,
+          to_unify, uf, variables, function, functions)?;
         let ty = self.ty;
         uf.unify(self.ty, to_unify).map_err(|()|
           AstError::CouldNotUnify {
@@ -600,8 +600,7 @@ impl<'t> Expr<'t> {
         match dst.kind {
           ExprKind::Variable(ref name) => {
             if let Some(&ty) = variables.get(name) {
-              try!(src.unify_type(ctxt, ty,
-                uf, variables, function, functions));
+              src.unify_type(ctxt, ty, uf, variables, function, functions)?;
             } else {
               return Err(AstError::UndefinedVariableName {
                 name: name.clone(),
@@ -613,10 +612,9 @@ impl<'t> Expr<'t> {
           ExprKind::Deref(ref mut dst) => {
             let mut inner_ty = Type::infer(ctxt);
             inner_ty.generate_inference_id(uf, ctxt);
-            try!(dst.unify_type(ctxt, Type::ref_(inner_ty, ctxt),
-              uf, variables, function, functions));
-            try!(src.unify_type(ctxt, inner_ty,
-              uf, variables, function, functions));
+            dst.unify_type(ctxt, Type::ref_(inner_ty, ctxt),
+              uf, variables, function, functions)?;
+            src.unify_type(ctxt, inner_ty, uf, variables, function, functions)?;
           }
           _ => return Err(AstError::NotAnLvalue {
             expr: format!("{:?}", dst),
@@ -655,24 +653,24 @@ impl<'t> Expr<'t> {
           ref mut value,
           ..
         } => {
-          try!(ty.finalize(uf, ctxt).map_err(|()|
+          ty.finalize(uf, ctxt).map_err(|()|
             AstError::NoActualType {
               compiler: fl!(),
               function: function.name.clone(),
-            }));
+            })?;
           if let Some(ref mut v) = *value {
-            try!(v.finalize_type(uf, function, ctxt));
+            v.finalize_type(uf, function, ctxt)?;
           }
         }
         Stmt::Expr(ref mut e @ Expr {
           kind: ExprKind::Return(_),
           ..
         }) => {
-          try!(e.finalize_type(uf, function, ctxt));
+          e.finalize_type(uf, function, ctxt)?;
           live_blk = false;
         }
         Stmt::Expr(ref mut e) => {
-          try!(e.finalize_type(uf, function, ctxt));
+          e.finalize_type(uf, function, ctxt)?;
         }
       }
     }
@@ -684,7 +682,7 @@ impl<'t> Expr<'t> {
           compiler: fl!(),
         });
       }
-      try!(expr.finalize_type(uf, function, ctxt));
+      expr.finalize_type(uf, function, ctxt)?;
     }
     Ok(())
   }
@@ -692,12 +690,12 @@ impl<'t> Expr<'t> {
   pub fn finalize_type(&mut self, uf: &mut ty::UnionFind<'t>,
       function: &Function<'t>, ctxt: &'t TypeContext<'t>)
       -> Result<(), AstError<'t>> {
-    try!(self.ty.finalize(uf, ctxt).map_err(|()|
+    self.ty.finalize(uf, ctxt).map_err(|()|
        AstError::NoActualType {
         compiler: fl!(),
         function: function.name.clone(),
       }
-    ));
+    )?;
 
     match self.kind {
       ExprKind::IntLiteral(_) | ExprKind::BoolLiteral(_)
@@ -706,17 +704,17 @@ impl<'t> Expr<'t> {
       }
       ExprKind::TupleLiteral(ref mut v) => {
         for el in v {
-          try!(el.ty.finalize(uf, ctxt).map_err(|()|
+          el.ty.finalize(uf, ctxt).map_err(|()|
             AstError::NoActualType {
               compiler: fl!(),
               function: function.name.clone(),
             }
-          ))
+          )?
         }
         Ok(())
       }
       ExprKind::Pos(ref mut inner) => {
-        try!(inner.finalize_type(uf, function, ctxt));
+        inner.finalize_type(uf, function, ctxt)?;
         assert!(self.ty == inner.ty);
         match *self.ty.0 {
           TypeVariant::SInt(_) | TypeVariant::UInt(_) => Ok(()),
@@ -731,7 +729,7 @@ impl<'t> Expr<'t> {
         }
       }
       ExprKind::Neg(ref mut inner) => {
-        try!(inner.finalize_type(uf, function, ctxt));
+        inner.finalize_type(uf, function, ctxt)?;
         assert!(self.ty == inner.ty);
         match *self.ty.0 {
           TypeVariant::SInt(_) => Ok(()),
@@ -746,7 +744,7 @@ impl<'t> Expr<'t> {
         }
       }
       ExprKind::Not(ref mut inner) => {
-        try!(inner.finalize_type(uf, function, ctxt));
+        inner.finalize_type(uf, function, ctxt)?;
         assert!(self.ty == inner.ty);
         match *self.ty.0 {
           TypeVariant::SInt(_) | TypeVariant::UInt(_)
@@ -762,13 +760,13 @@ impl<'t> Expr<'t> {
         }
       }
       ExprKind::Ref(ref mut inner) => {
-        try!(inner.finalize_type(uf, function, ctxt));
+        inner.finalize_type(uf, function, ctxt)?;
         assert!(self.ty == Type::ref_(inner.ty, ctxt),
           "self: {:?}, inner: &{:?}", self.ty, inner.ty);
         Ok(())
       }
       ExprKind::Deref(ref mut inner) => {
-        try!(inner.finalize_type(uf, function, ctxt));
+        inner.finalize_type(uf, function, ctxt)?;
         assert!(Type::ref_(self.ty, ctxt) == inner.ty,
           "self: {:?}, inner: *{:?}", self.ty, inner.ty);
         Ok(())
@@ -783,7 +781,7 @@ impl<'t> Expr<'t> {
         ref mut rhs,
         ..
       } => {
-        try!(lhs.finalize_type(uf, function, ctxt));
+        lhs.finalize_type(uf, function, ctxt)?;
         rhs.finalize_type(uf, function, ctxt)
       }
       ExprKind::Call {
@@ -791,7 +789,7 @@ impl<'t> Expr<'t> {
         ..
       } => {
         for arg in args {
-          try!(arg.finalize_type(uf, function, ctxt));
+          arg.finalize_type(uf, function, ctxt)?;
         }
         Ok(())
       }
@@ -800,8 +798,8 @@ impl<'t> Expr<'t> {
         ref mut then_value,
         ref mut else_value,
       } => {
-        try!(condition.finalize_type(uf, function, ctxt));
-        try!(Self::finalize_block_ty(then_value, uf, function, ctxt));
+        condition.finalize_type(uf, function, ctxt)?;
+        Self::finalize_block_ty(then_value, uf, function, ctxt)?;
         Self::finalize_block_ty(else_value, uf, function, ctxt)
       }
       ExprKind::Block(ref mut blk) => {

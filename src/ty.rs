@@ -58,9 +58,9 @@ impl<'t> std::fmt::Debug for Type<'t> {
         if v.len() == 0 {
           write!(f, "Tuple()")
         } else {
-          try!(write!(f, "Tuple("));
+          write!(f, "Tuple(")?;
           for el in &v[..v.len() - 1] {
-            try!(write!(f, "{:?}, ", el));
+            write!(f, "{:?}, ", el)?;
           }
           write!(f, "{:?})", v[v.len() - 1])
         }
@@ -262,12 +262,12 @@ impl<'t> std::fmt::Display for Type<'t> {
       TypeVariant::Diverging => "!",
       TypeVariant::Reference(inner) => return write!(f, "&{}", inner),
       TypeVariant::Tuple(ref v) => {
-        try!(write!(f, "("));
+        write!(f, "(")?;
         if v.len() == 0 {
           return write!(f,  ")");
         } else {
           for el in &v[..v.len() - 1] {
-            try!(write!(f, "{}, ", el));
+            write!(f, "{}, ", el)?;
           }
           return write!(f, "{})", v[v.len() - 1]);
         }
@@ -342,7 +342,7 @@ impl<'t> UnionFind<'t> {
             (&TypeVariant::Tuple(ref left),
                 &TypeVariant::Tuple(ref right)) => {
               for (l, r) in left.into_iter().zip(right) {
-                try!(self.unify(*l, *r))
+                self.unify(*l, *r)?
               }
               Ok(())
             }

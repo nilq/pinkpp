@@ -1,7 +1,6 @@
 fn main() -> s32 {
-  first((1, 0));
+  0
 }
 
 fn first(x: (s32, s32)) {
-  x.0
 }

@@ -76,6 +76,13 @@ impl Value {
         value_slice.len())
     }
   }
+
+  #[allow(dead_code)]
+  pub fn dump(self) {
+    unsafe {
+      LLVMDumpValue(self.0)
+    }
+  }
 }
 
 #[derive(Debug)]

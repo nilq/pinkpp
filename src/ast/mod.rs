@@ -30,7 +30,7 @@ impl<'t> Ast<'t> {
         }) => {
           let ty = ty::Function::new(
             args.iter().map(|&(_, t)| t).collect(), ret);
-          let f = try!(Function::new(name.clone(), ret, args));
+          let f = Function::new(name.clone(), ret, args)?;
           function_types.insert(name.clone(), ty);
           if let Some(_) =
               functions.insert(name.clone(), (f, body)) {
@@ -59,9 +59,9 @@ impl<'t> Ast<'t> {
         in self.functions.iter_mut() {
       let mut uf = ty::UnionFind::new();
       let mut vars = HashMap::<String, Type>::new();
-      try!(Expr::typeck_block(body, &self.ctxt, func.ret_ty,
-        &mut uf, &mut vars, func, &self.function_types));
-      try!(Expr::finalize_block_ty(body, &mut uf, func, &self.ctxt));
+      Expr::typeck_block(body, &self.ctxt, func.ret_ty,
+        &mut uf, &mut vars, func, &self.function_types)?;
+      Expr::finalize_block_ty(body, &mut uf, func, &self.ctxt)?;
     }
     if let Some(&(ref f, _)) = self.functions.get("main") {
       if *f.ret_ty.0 != ty::TypeVariant::SInt(ty::Int::I32) ||

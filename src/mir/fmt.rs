@@ -5,18 +5,17 @@ use std::fmt::{Debug, Display, Formatter, Error};
 impl<'t> Display for Function<'t> {
   fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
     for (i, var) in self.locals.iter().enumerate() {
-      try!(writeln!(f, "  let v{}: {};", i, var));
+      writeln!(f, "  let v{}: {};", i, var)?;
     }
     for (i, tmp) in self.temporaries.iter().enumerate() {
-      try!(writeln!(f, "  let tmp{}: {};", i, tmp));
+      writeln!(f, "  let tmp{}: {};", i, tmp)?;
     }
     for (i, block) in self.blocks.iter().enumerate() {
-      try!(writeln!(f, "  bb{}: {{", i));
+      writeln!(f, "bb{}:", i)?;
       for stmt in &block.statements {
-        try!(writeln!(f, "  {};", stmt));
+        writeln!(f, "  {};", stmt)?;
       }
-      try!(writeln!(f, "  {};", block.terminator));
-      try!(writeln!(f, "  }}"));
+      writeln!(f, "  {};", block.terminator)?;
     }
     Ok(())
   }
@@ -69,12 +68,12 @@ impl Display for Literal {
       }
       Literal::Bool(ref value) => write!(f, "{}", value),
       Literal::Tuple(ref v) => {
-        try!(write!(f, "("));
+        write!(f, "(")?;
         if v.len() == 0 {
           write!(f, ")")
         } else {
           for el in &v[..v.len() - 1] {
-            try!(write!(f, "{}, ", el));
+            write!(f, "{}, ", el)?;
           }
           write!(f, "{})", v[v.len() - 1])
         }
@@ -131,12 +130,12 @@ impl Display for Value {
         ref callee,
         ref args,
       } => {
-        try!(write!(f, "{}(", callee));
+        write!(f, "{}(", callee)?;
         if args.len() != 0 {
           for arg in &args[..args.len() - 1] {
-            try!(write!(f, "{}, ", arg));
+            write!(f, "{}, ", arg)?;
           }
-          try!(write!(f, "{}", args[args.len() - 1]));
+          write!(f, "{}", args[args.len() - 1])?;
         }
         write!(f, ")")
       }
@@ -159,17 +158,17 @@ impl Display for Parameter {
 impl<'t> Display for Mir<'t> {
   fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
     for (name, function) in &self.functions {
-      try!(write!(f, "fn {}(", name));
+      write!(f, "fn {}(", name)?;
       let inputs = function.ty.input();
       if inputs.len() != 0 {
         for input in &inputs[..inputs.len() - 1] {
-          try!(write!(f, "{}, ", input));
+          write!(f, "{}, ", input)?;
         }
-        try!(write!(f, "{}", inputs[inputs.len() - 1]));
+        write!(f, "{}", inputs[inputs.len() - 1])?;
       }
-      try!(writeln!(f, ") -> {} {{", function.ty.output()));
-      try!(write!(f, "{}", function));
-      try!(writeln!(f, "}}\n"));
+      writeln!(f, ") -> {} {{", function.ty.output())?;
+      write!(f, "{}", function)?;
+      writeln!(f, "}}\n")?;
     }
     Ok(())
   }

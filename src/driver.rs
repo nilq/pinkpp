@@ -1,4 +1,4 @@
-#![feature(set_recovery)]
+#![feature(question_mark)]
 
 extern crate argparse;
 extern crate typed_arena;
