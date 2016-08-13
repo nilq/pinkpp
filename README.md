@@ -2,5 +2,7 @@ Pink
 ---
 A language and compiler by Nicole Mazzuca :)
 
-It currently does barely anything, but it eventually is intended to be a
-"systems language with dependent types".
+The formatting shall follow the [Heresy] formatting conventions, except with
+80 character line widths.
+
+[Heresy]: https://gist.github.com/ubsan/0276c0ed21f8c06994a2267d077cf243
