@@ -50,13 +50,12 @@ impl Token {
             Token::KeywordFn => TokenType::Item,
             Token::KeywordLet | Token::CloseBrace => TokenType::Statement,
             Token::KeywordReturn | Token::KeywordTrue | Token::KeywordFalse
-                | Token::KeywordIf | Token::Ident(_) | Token::Integer {..}
+            | Token::KeywordIf | Token::Ident(_) | Token::Integer {..}
             => TokenType::Expression,
             Token::Operand(_) => TokenType::Operand,
             Token::KeywordElse | Token::OpenParen | Token::CloseParen
-                | Token::Dot | Token::OpenBrace |  Token::Semicolon
-                | Token::Colon | Token::SkinnyArrow | Token::Comma
-                | Token::Equals | Token::Eof
+            | Token::Dot | Token::OpenBrace |  Token::Semicolon | Token::Colon
+            | Token::SkinnyArrow | Token::Comma | Token::Equals | Token::Eof
             => TokenType::Misc,
         }
     }
@@ -102,8 +101,8 @@ impl Operand {
             Operand::Xor => 5,
             Operand::Or => 4,
             Operand::EqualsEquals | Operand::NotEquals | Operand::LessThan
-                | Operand::LessThanEquals | Operand::GreaterThan
-                | Operand::GreaterThanEquals
+            | Operand::LessThanEquals | Operand::GreaterThan
+            | Operand::GreaterThanEquals
             => 3,
             Operand::AndAnd => 2,
             Operand::OrOr => 1,
