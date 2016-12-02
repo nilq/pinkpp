@@ -6,7 +6,7 @@ use ty::{self, Type, TypeContext};
 
 use Either::{self, Left, Right};
 
-type ParseResult<T> = Result<T, ParserError>;
+pub type ParseResult<T> = Result<T, ParserError>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Token {
@@ -112,8 +112,7 @@ impl Operand {
 
     // simply a convenience function
     pub fn expr<'t>(
-        &self, lhs: Expr<'t>, rhs: Expr<'t>,
-        ctxt: &'t TypeContext<'t>
+        &self, lhs: Expr<'t>, rhs: Expr<'t>, ctxt: &'t TypeContext<'t>
     ) -> Expr<'t> {
         self.precedence(); // makes certain that self is a binop
         Expr {

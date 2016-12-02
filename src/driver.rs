@@ -1,4 +1,5 @@
 #![feature(question_mark)]
+#![allow(unused)]
 
 extern crate argparse;
 extern crate typed_arena;
@@ -30,7 +31,7 @@ fn main() {
     let mut print_llir = false;
     let mut opt = false;
     {
-        use argparse::{ArgumentParser, Store, StoreOption, StoreTrue};
+        use argparse::{ArgumentParser, Store, StoreOption, StoreTrue, List};
 
         let mut ap = ArgumentParser::new();
         ap.set_description("\
@@ -45,15 +46,15 @@ fn main() {
         );
         ap.refer(&mut print_mir).add_option(
             &["--print-mir"], StoreTrue,
-            "Pass if you would like to print the generated MIR"
+            "Pass if you would like to print the generated MIR",
         );
         ap.refer(&mut print_llir).add_option(
             &["--print-llir"], StoreTrue,
-            "Pass if you would like to print the generated LLVM IR"
+            "Pass if you would like to print the generated LLVM IR",
         );
         ap.refer(&mut opt).add_option(
             &["--opt", "-O"], StoreTrue,
-            "Pass if you would like to optimize the generated LLVM IR"
+            "Pass if you would like to optimize the generated LLVM IR",
         );
 
         ap.parse_args_or_exit();
