@@ -59,8 +59,9 @@ pub struct Expr<'t> {
 
 // constructors
 impl<'t> Expr<'t> {
-  pub fn call(callee: String, args: Vec<Expr<'t>>, ctxt: &'t TypeContext<'t>)
-      -> Self {
+  pub fn call(
+    callee: String, args: Vec<Expr<'t>>, ctxt: &'t TypeContext<'t>
+  ) -> Self {
     Expr {
       kind: ExprKind::Call {
         callee: callee,
@@ -77,8 +78,12 @@ impl<'t> Expr<'t> {
     }
   }
 
-  pub fn if_else(cond: Expr<'t>, then: Block<'t>, else_: Block<'t>,
-      ctxt: &'t TypeContext<'t>) -> Self {
+  pub fn if_else(
+    cond: Expr<'t>,
+    then: Block<'t>,
+    else_: Block<'t>,
+    ctxt: &'t TypeContext<'t>,
+  ) -> Self {
     Expr {
       kind: ExprKind::If {
         condition: Box::new(cond),
@@ -181,8 +186,9 @@ impl<'t> Expr<'t> {
     }
   }
 
-  pub fn field_access(lhs: Expr<'t>, field: u64, ctxt: &'t TypeContext<'t>)
-      -> Self {
+  pub fn field_access(
+    lhs: Expr<'t>, field: u64, ctxt: &'t TypeContext<'t>,
+  ) -> Self {
     Expr {
       kind: ExprKind::Field {
         lhs: Box::new(lhs),
@@ -198,11 +204,20 @@ impl<'t> Expr<'t> {
   pub fn is_block(&self) -> bool {
     match self.kind {
       ExprKind::If {..} | ExprKind::Block(_) => true,
-      ExprKind::Call {..} | ExprKind::Binop {..} | ExprKind::Pos(_)
-      | ExprKind::Neg(_) | ExprKind::Not(_) | ExprKind::Variable(_)
-      | ExprKind::Ref(_) | ExprKind::Deref(_) | ExprKind::IntLiteral(_)
-      | ExprKind::BoolLiteral(_) | ExprKind::TupleLiteral(_)
-      | ExprKind::Return(_) | ExprKind::Assign {..} | ExprKind::Field {..}
+      ExprKind::Call {..}
+      | ExprKind::Binop {..}
+      | ExprKind::Pos(_)
+      | ExprKind::Neg(_)
+      | ExprKind::Not(_)
+      | ExprKind::Variable(_)
+      | ExprKind::Ref(_)
+      | ExprKind::Deref(_)
+      | ExprKind::IntLiteral(_)
+      | ExprKind::BoolLiteral(_)
+      | ExprKind::TupleLiteral(_)
+      | ExprKind::Return(_)
+      | ExprKind::Assign {..}
+      | ExprKind::Field {..}
         => false,
     }
   }
@@ -210,11 +225,15 @@ impl<'t> Expr<'t> {
 
 // typechecking
 impl<'t> Expr<'t> {
-  pub fn typeck_block(block: &mut Block<'t>, ctxt: &'t TypeContext<'t>,
-      to_unify: Type<'t>, uf: &mut ty::UnionFind<'t>,
-      variables: &mut HashMap<String, Type<'t>>, function: &Function<'t>,
-      functions: &HashMap<String, ty::Function<'t>>)
-      -> Result<(), AstError<'t>> {
+  pub fn typeck_block(
+    block: &mut Block<'t>,
+    ctxt: &'t TypeContext<'t>,
+    to_unify: Type<'t>,
+    uf: &mut ty::UnionFind<'t>,
+    variables: &mut HashMap<String, Type<'t>>,
+    function: &Function<'t>,
+    functions: &HashMap<String, ty::Function<'t>>,
+  ) -> Result<(), AstError<'t>> {
     let mut live_blk = true;
     for stmt in block.stmts.iter_mut() {
       match *stmt {
@@ -266,11 +285,15 @@ impl<'t> Expr<'t> {
     Ok(())
   }
 
-  pub fn unify_type(&mut self, ctxt: &'t TypeContext<'t>,
-      to_unify: Type<'t>, uf: &mut ty::UnionFind<'t>,
-      variables: &mut HashMap<String, Type<'t>>, function: &Function<'t>,
-      functions: &HashMap<String, ty::Function<'t>>)
-      -> Result<(), AstError<'t>> {
+  pub fn unify_type(
+    &mut self,
+    ctxt: &'t TypeContext<'t>,
+    to_unify: Type<'t>,
+    uf: &mut ty::UnionFind<'t>,
+    variables: &mut HashMap<String, Type<'t>>,
+    function: &Function<'t>,
+    functions: &HashMap<String, ty::Function<'t>>,
+  ) -> Result<(), AstError<'t>> {
     self.ty.generate_inference_id(uf, ctxt);
     match self.kind {
       ExprKind::IntLiteral(_) | ExprKind::BoolLiteral(_) => {
@@ -406,16 +429,22 @@ impl<'t> Expr<'t> {
         ref mut rhs,
       } => {
         match op {
-          Operand::Mul | Operand::Div
-          | Operand::Rem | Operand::Plus
-          | Operand::Minus | Operand::Shl
-          | Operand::Shr | Operand::And
-          | Operand::Xor | Operand::Or => {
+          Operand::Mul
+          | Operand::Div
+          | Operand::Rem
+          | Operand::Plus
+          | Operand::Minus
+          | Operand::Shl
+          | Operand::Shr
+          | Operand::And
+          | Operand::Xor
+          | Operand::Or
+          => {
             let ty = self.ty;
-            lhs.unify_type(ctxt, self.ty,
-                uf, variables, function, functions)?;
-            match rhs.unify_type(ctxt, lhs.ty,
-                uf, variables, function, functions) {
+            lhs.unify_type(ctxt, self.ty, uf, variables, function, functions)?;
+            match rhs.unify_type(
+              ctxt, lhs.ty, uf, variables, function, functions
+            ) {
               Err(AstError::CouldNotUnify {
                 first, second, function, ..
               }) => return Err(AstError::BinopUnsupported {
@@ -438,9 +467,12 @@ impl<'t> Expr<'t> {
             )
           }
 
-          Operand::EqualsEquals | Operand::NotEquals
-          | Operand::LessThan | Operand::LessThanEquals
-          | Operand::GreaterThan | Operand::GreaterThanEquals => {
+          Operand::EqualsEquals
+          | Operand::NotEquals
+          | Operand::LessThan
+          | Operand::LessThanEquals
+          | Operand::GreaterThan
+          | Operand::GreaterThanEquals => {
             self.ty = Type::bool(ctxt);
             rhs.ty.generate_inference_id(uf, ctxt);
             lhs.unify_type(ctxt, rhs.ty,
@@ -546,11 +578,10 @@ impl<'t> Expr<'t> {
               }
             )
           }
-          None => return Err(
-            AstError::FunctionDoesntExist {
-              function: callee.clone(),
-              compiler: fl!(),
-            })
+          None => return Err(AstError::FunctionDoesntExist {
+            function: callee.clone(),
+            compiler: fl!(),
+          })
         }
       }
       ExprKind::If {
@@ -558,12 +589,15 @@ impl<'t> Expr<'t> {
         ref mut then_value,
         ref mut else_value,
       } => {
-        condition.unify_type(ctxt, Type::bool(ctxt),
-          uf, variables, function, functions)?;
-        Self::typeck_block(then_value, ctxt,
-          to_unify, uf, variables, function, functions)?;
-        Self::typeck_block(else_value, ctxt,
-          to_unify, uf, variables, function, functions)?;
+        condition.unify_type(
+          ctxt, Type::bool(ctxt), uf, variables, function, functions
+        )?;
+        Self::typeck_block(
+          then_value, ctxt, to_unify, uf, variables, function, functions
+        )?;
+        Self::typeck_block(
+          else_value, ctxt, to_unify, uf, variables, function, functions
+        )?;
         let ty = self.ty;
         uf.unify(self.ty, to_unify).map_err(|()|
           AstError::CouldNotUnify {
@@ -575,8 +609,9 @@ impl<'t> Expr<'t> {
         )
       }
       ExprKind::Block(ref mut blk) => {
-        Self::typeck_block(blk, ctxt,
-          to_unify, uf, variables, function, functions)?;
+        Self::typeck_block(
+          blk, ctxt, to_unify, uf, variables, function, functions
+        )?;
         let ty = self.ty;
         uf.unify(self.ty, to_unify).map_err(|()|
           AstError::CouldNotUnify {
@@ -589,8 +624,9 @@ impl<'t> Expr<'t> {
       }
       ExprKind::Return(ref mut ret) => {
         self.ty = Type::diverging(ctxt);
-        ret.unify_type(ctxt, function.ret_ty,
-           uf, variables, function, functions)
+        ret.unify_type(
+          ctxt, function.ret_ty, uf, variables, function, functions
+        )
       }
       ExprKind::Assign {
         ref mut dst,
@@ -612,8 +648,14 @@ impl<'t> Expr<'t> {
           ExprKind::Deref(ref mut dst) => {
             let mut inner_ty = Type::infer(ctxt);
             inner_ty.generate_inference_id(uf, ctxt);
-            dst.unify_type(ctxt, Type::ref_(inner_ty, ctxt),
-              uf, variables, function, functions)?;
+            dst.unify_type(
+              ctxt,
+              Type::ref_(inner_ty, ctxt),
+              uf,
+              variables,
+              function,
+              functions
+            )?;
             src.unify_type(ctxt, inner_ty, uf, variables, function, functions)?;
           }
           _ => return Err(AstError::NotAnLvalue {
@@ -634,10 +676,12 @@ impl<'t> Expr<'t> {
     }
   }
 
-  pub fn finalize_block_ty(block: &mut Block<'t>,
-      uf: &mut ty::UnionFind<'t>, function: &Function<'t>,
-      ctxt: &'t TypeContext<'t>)
-      -> Result<(), AstError<'t>> {
+  pub fn finalize_block_ty(
+    block: &mut Block<'t>,
+    uf: &mut ty::UnionFind<'t>,
+    function: &Function<'t>,
+    ctxt: &'t TypeContext<'t>
+  ) -> Result<(), AstError<'t>> {
     let mut live_blk = true;
 
     for stmt in block.stmts.iter_mut() {
@@ -661,17 +705,17 @@ impl<'t> Expr<'t> {
           if let Some(ref mut v) = *value {
             v.finalize_type(uf, function, ctxt)?;
           }
-        }
+        },
         Stmt::Expr(ref mut e @ Expr {
           kind: ExprKind::Return(_),
           ..
         }) => {
           e.finalize_type(uf, function, ctxt)?;
           live_blk = false;
-        }
+        },
         Stmt::Expr(ref mut e) => {
           e.finalize_type(uf, function, ctxt)?;
-        }
+        },
       }
     }
 
@@ -687,9 +731,12 @@ impl<'t> Expr<'t> {
     Ok(())
   }
 
-  pub fn finalize_type(&mut self, uf: &mut ty::UnionFind<'t>,
-      function: &Function<'t>, ctxt: &'t TypeContext<'t>)
-      -> Result<(), AstError<'t>> {
+  pub fn finalize_type(
+    &mut self,
+    uf: &mut ty::UnionFind<'t>,
+    function: &Function<'t>,
+    ctxt: &'t TypeContext<'t>
+  ) -> Result<(), AstError<'t>> {
     self.ty.finalize(uf, ctxt).map_err(|()|
        AstError::NoActualType {
         compiler: fl!(),
@@ -698,10 +745,10 @@ impl<'t> Expr<'t> {
     )?;
 
     match self.kind {
-      ExprKind::IntLiteral(_) | ExprKind::BoolLiteral(_)
-      | ExprKind::Variable(_) => {
-        Ok(())
-      }
+      ExprKind::IntLiteral(_)
+      | ExprKind::BoolLiteral(_)
+      | ExprKind::Variable(_)
+      => Ok(()),
       ExprKind::TupleLiteral(ref mut v) => {
         for el in v {
           el.ty.finalize(uf, ctxt).map_err(|()|
@@ -822,10 +869,14 @@ impl<'t> Expr<'t> {
 
 // into mir
 impl<'t> Expr<'t> {
-  pub fn translate(self, mir: &mir::Mir<'t>, function: &mut Function<'t>,
-      mut block: mir::Block, locals: &mut HashMap<String, mir::Local>,
-      fn_types: &HashMap<String, ty::Function<'t>>)
-      -> (mir::Value, Option<mir::Block>) {
+  pub fn translate(
+    self,
+    mir: &mir::Mir<'t>,
+    function: &mut Function<'t>,
+    mut block: mir::Block,
+    locals: &mut HashMap<String, mir::Local>,
+    fn_types: &HashMap<String, ty::Function<'t>>
+  ) -> (mir::Value, Option<mir::Block>) {
     assert!(self.ty.is_final_type(), "not final type: {:?}", self);
     match self.kind {
       ExprKind::IntLiteral(n) => {
@@ -976,22 +1027,22 @@ impl<'t> Expr<'t> {
           }
         };
         (match op {
-          Operand::Plus =>
-            mir::Value::add(lhs, rhs, mir,
-              &mut function.raw, &mut blk, fn_types),
-          Operand::Minus =>
-            mir::Value::sub(lhs, rhs, mir,
-              &mut function.raw, &mut blk, fn_types),
+          Operand::Plus => mir::Value::add(
+            lhs, rhs, mir, &mut function.raw, &mut blk, fn_types
+          ),
+          Operand::Minus => mir::Value::sub(
+            lhs, rhs, mir, &mut function.raw, &mut blk, fn_types
+          ),
 
-          Operand::Mul =>
-            mir::Value::mul(lhs, rhs, mir,
-              &mut function.raw, &mut blk, fn_types),
-          Operand::Div =>
-            mir::Value::div(lhs, rhs, mir,
-              &mut function.raw, &mut blk, fn_types),
-          Operand::Rem =>
-            mir::Value::rem(lhs, rhs, mir,
-              &mut function.raw, &mut blk, fn_types),
+          Operand::Mul => mir::Value::mul(
+            lhs, rhs, mir, &mut function.raw, &mut blk, fn_types
+          ),
+          Operand::Div => mir::Value::div(
+            lhs, rhs, mir, &mut function.raw, &mut blk, fn_types
+          ),
+          Operand::Rem => mir::Value::rem(
+            lhs, rhs, mir, &mut function.raw, &mut blk, fn_types
+          ),
 
           Operand::And =>
             mir::Value::and(lhs, rhs, mir,
