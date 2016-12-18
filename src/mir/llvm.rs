@@ -15,16 +15,30 @@ use self::llvm_sys::analysis::*;
 
 // TODO(ubsan): ZSTs should not be passed into functions
 
+
+#[allow(non_upper_case_globals)]
+const LLFalse: LLVMBool = false as LLVMBool;
+#[allow(unused, non_upper_case_globals)]
+const LLTrue: LLVMBool = true as LLVMBool;
+
 macro_rules! cstr {
   ($s:expr) => (
     concat!($s, "\0").as_ptr() as *const self::libc::c_char
   )
 }
 
-pub use self::llvm_sys::LLVMIntPredicate::{LLVMIntEQ as IntEQ,
-  LLVMIntNE as IntNE, LLVMIntUGT as IntUGT, LLVMIntUGE as IntUGE,
-  LLVMIntULT as IntULT, LLVMIntULE as IntULE, LLVMIntSGT as IntSGT,
-  LLVMIntSGE as IntSGE, LLVMIntSLT as IntSLT, LLVMIntSLE as IntSLE};
+pub use self::llvm_sys::LLVMIntPredicate::{
+  LLVMIntEQ as IntEQ,
+  LLVMIntNE as IntNE,
+  LLVMIntUGT as IntUGT,
+  LLVMIntUGE as IntUGE,
+  LLVMIntULT as IntULT,
+  LLVMIntULE as IntULE,
+  LLVMIntSGT as IntSGT,
+  LLVMIntSGE as IntSGE,
+  LLVMIntSLT as IntSLT,
+  LLVMIntSLE as IntSLE,
+};
 
 pub use self::llvm_sys::target_machine::LLVMCodeGenOptLevel::{
   LLVMCodeGenLevelNone as NoOptimization,
@@ -39,14 +53,13 @@ pub struct Value(LLVMValueRef);
 impl Value {
   pub fn const_int(ty: Type, value: u64) -> Value {
     unsafe {
-      Value(LLVMConstInt(ty.0, value, false as LLVMBool))
+      Value(LLVMConstInt(ty.0, value, LLFalse))
     }
   }
 
   pub fn const_bool(value: bool) -> Value {
     unsafe {
-      Value(LLVMConstInt(LLVMInt1Type(),
-        value as u64, false as LLVMBool))
+      Value(LLVMConstInt(LLVMInt1Type(), value as u64, LLFalse))
     }
   }
 
@@ -54,8 +67,7 @@ impl Value {
     unsafe {
       let llvm_values = Self::llvm_slice(values);
       let len = llvm_values.len() as u32;
-      Value(LLVMConstStruct(llvm_values.as_ptr() as *mut _, len,
-        false as LLVMBool))
+      Value(LLVMConstStruct(llvm_values.as_ptr() as *mut _, len, LLFalse))
     }
   }
 
@@ -433,8 +445,7 @@ pub fn get_type(target_data: &TargetData, ty: ty::Type) -> Type {
         let mut llvm =
           v.iter().map(|el| get_type(target_data, *el).0)
             .collect::<Vec<_>>();
-        LLVMStructType(llvm.as_mut_ptr(), llvm.len() as u32,
-          false as LLVMBool)
+        LLVMStructType(llvm.as_mut_ptr(), llvm.len() as u32, LLFalse)
       }
       TypeVariant::Diverging
         => panic!("ICE: Attempted to get the LLVM type of \
@@ -461,7 +472,11 @@ pub fn get_function_type(target_data: &TargetData, ty: &ty::Function)
   unsafe {
     let mut args = ty.input().iter().map(|a| get_type(target_data, *a).0)
       .collect::<Vec<_>>();
-    Type(LLVMFunctionType(get_return_type(target_data, ty.output()).0,
-      args.as_mut_ptr(), args.len() as u32, false as LLVMBool))
+    Type(LLVMFunctionType(
+      get_return_type(target_data, ty.output()).0,
+      args.as_mut_ptr(),
+      args.len() as u32,
+      LLFalse
+    ))
   }
 }

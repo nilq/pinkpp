@@ -1,15 +1,15 @@
 fn main() -> s32 {
-    let x = (0s32, 1s32);
-    //first((0, 1))
-    //test(0)
-    0
+  let x = (0s32, 1s32);
+  //first((0, 1))
+  //test(0)
+  0
 }
 /*
-   fn first(x: (s32, s32)) -> s32 {
-       0
-   }
+  fn first(x: (s32, s32)) -> s32 {
+    0
+  }
 
-   fn test(x: s32) -> s32 {
-       x
-   }
+  fn test(x: s32) -> s32 {
+    x
+  }
 */

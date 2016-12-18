@@ -15,7 +15,6 @@ pub struct Function<'t> {
   locals: Vec<Type<'t>>,
   blocks: Vec<BlockData>,
 }
-// TODO(ubsan): connect Variable and Temporary into one Local type
 #[derive(Copy, Clone, Debug)]
 pub struct Local(u32);
 #[derive(Copy, Clone, Debug)]
@@ -29,10 +28,10 @@ impl<'t> Function<'t> {
       locals: Vec::new(),
       blocks: Vec::new(),
     };
-    assert_eq!(START_BLOCK,
-      ret.new_block(Lvalue::Return, Terminator::Goto(END_BLOCK)));
-    assert_eq!(END_BLOCK,
-      ret.new_block(Lvalue::Return, Terminator::Return));
+    assert_eq!(
+      START_BLOCK, ret.new_block(Lvalue::Return, Terminator::Goto(END_BLOCK))
+    );
+    assert_eq!(END_BLOCK, ret.new_block(Lvalue::Return, Terminator::Return));
     let input_types = ret.ty.input().to_owned();
     {
       for ty in &input_types {
@@ -40,8 +39,9 @@ impl<'t> Function<'t> {
       }
       let blk = ret.get_block(&mut START_BLOCK);
       for i in 0..input_types.len() as u32 {
-        blk.statements.push(Statement(Lvalue::Local(Local(i)),
-          Value(ValueKind::Parameter(Parameter(i)))))
+        blk.statements.push(Statement(
+          Lvalue::Local(Local(i)), Value(ValueKind::Parameter(Parameter(i)))
+        ))
       }
     }
     END_BLOCK.terminate(&mut ret, Terminator::Return);
@@ -76,8 +76,14 @@ impl<'t> Function<'t> {
     self.locals[var.0 as usize]
   }
 
-  fn flatten(&mut self, value: Value, mir: &Mir<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Local {
+  fn flatten(
+    &mut self,
+    value: Value,
+    mir: &Mir<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String,
+    ty::Function<'t>>,
+  ) -> Local {
     if let ValueKind::Lvalue(Lvalue::Local(local)) = value.0 {
       local
     } else {
@@ -88,8 +94,12 @@ impl<'t> Function<'t> {
     }
   }
 
-  fn build(self, mir: &Mir<'t>, llfunc: llvm::Value,
-       funcs: &HashMap<String, (llvm::Value, Type<'t>)>) {
+  fn build(
+    self,
+    mir: &Mir<'t>,
+    llfunc: llvm::Value,
+    funcs: &HashMap<String, (llvm::Value, Type<'t>)>,
+  ) {
     LlFunction::build(mir, self, llfunc, funcs)
   }
 }
@@ -104,8 +114,12 @@ struct LlFunction<'t> {
 }
 
 impl<'t> LlFunction<'t> {
-  fn build(mir: &Mir<'t>, mirfunc: Function<'t>, llfunc: llvm::Value,
-      funcs: &HashMap<String, (llvm::Value, Type<'t>)>) {
+  fn build(
+    mir: &Mir<'t>,
+    mirfunc: Function<'t>,
+    llfunc: llvm::Value,
+    funcs: &HashMap<String, (llvm::Value, Type<'t>)>,
+  ) {
     let builder = llvm::Builder::new();
     let mut blocks = Vec::new();
     for i in 0..mirfunc.blocks.len() {
@@ -116,13 +130,14 @@ impl<'t> LlFunction<'t> {
 
     let mut locals = Vec::new();
     for mir_local in &mirfunc.locals {
-      locals.push(
-        builder.build_alloca(
-          llvm::get_type(&mir.target_data, *mir_local), "var"));
+      locals.push(builder.build_alloca(
+        llvm::get_type(&mir.target_data, *mir_local), "var"
+      ));
     }
 
     let ret_ptr = builder.build_alloca(
-      llvm::get_type(&mir.target_data, mirfunc.ty.output()), "ret");
+      llvm::get_type(&mir.target_data, mirfunc.ty.output()), "ret",
+    );
 
     let mut self_ = LlFunction {
       mir: mirfunc,
@@ -170,16 +185,14 @@ enum Literal {
 }
 
 impl Literal {
-  fn to_llvm<'t>(self, function: &LlFunction<'t>)
-      -> llvm::Value {
+  fn to_llvm<'t>(self, function: &LlFunction<'t>) -> llvm::Value {
     match self {
       Literal::Int {
         value,
         ty,
         ..
       } => {
-        llvm::Value::const_int(
-          llvm::get_int_type(ty), value)
+        llvm::Value::const_int(llvm::get_int_type(ty), value)
       }
       Literal::Bool(value) => {
         llvm::Value::const_bool(value)
@@ -265,15 +278,20 @@ impl Value {
         value: value,
         signed: signed,
         ty: ty,
-      }))
+      }
+    ))
   }
   #[inline(always)]
   pub fn bool_literal(value: bool) -> Self {
     Value(ValueKind::Literal(Literal::Bool(value)))
   }
-  pub fn tuple_literal<'t>(v: Vec<Value>, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Value {
+  pub fn tuple_literal<'t>(
+    v: Vec<Value>,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>
+  ) -> Value {
     let mut leaf_v = Vec::new();
     for el in v {
       leaf_v.push(function.flatten(el, mir, block, fn_types))
@@ -300,162 +318,282 @@ impl Value {
   }
 
   // -- unops --
-  pub fn pos<'t>(inner: Self, mir: &Mir<'t>, function: &mut Function<'t>,
-      block: &mut Block, fn_types: &HashMap<String, ty::Function<'t>>)
-      -> Self {
+  pub fn pos<'t>(
+    inner: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Pos(function.flatten(inner, mir, block, fn_types)))
   }
-  pub fn neg<'t>(inner: Self, mir: &Mir<'t>, function: &mut Function<'t>,
-      block: &mut Block, fn_types: &HashMap<String, ty::Function<'t>>)
-      -> Self {
+  pub fn neg<'t>(
+    inner: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Neg(function.flatten(inner, mir, block, fn_types)))
   }
-  pub fn not<'t>(inner: Self, mir: &Mir<'t>, function: &mut Function<'t>,
-      block: &mut Block, fn_types: &HashMap<String, ty::Function<'t>>)
-      -> Self {
+  pub fn not<'t>(
+    inner: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Not(function.flatten(inner, mir, block, fn_types)))
   }
-  pub fn ref_<'t>(inner: Self, mir: &Mir<'t>, function: &mut Function<'t>,
-      block: &mut Block, fn_types: &HashMap<String, ty::Function<'t>>)
-      -> Self {
+  pub fn ref_<'t>(
+    inner: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     let inner_ty = inner.ty(mir, function, fn_types);
     let inner = function.flatten(inner, mir, block, fn_types);
     let ptr = function.new_local(Type::ref_(inner_ty, mir.ctxt));
-    block.add_stmt(Lvalue::Local(ptr), Value(ValueKind::Ref(inner)),
-      function);
+    block.add_stmt(Lvalue::Local(ptr), Value(ValueKind::Ref(inner)), function);
     Value::local(ptr)
   }
 
-  pub fn deref<'t>(inner: Self, mir: &Mir<'t>, function: &mut Function<'t>,
-      block: &mut Block, fn_types: &HashMap<String, ty::Function<'t>>)
-      -> Self {
+  pub fn deref<'t>(
+    inner: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     let ptr = function.flatten(inner, mir, block, fn_types);
     Value::lvalue(Lvalue::Deref(ptr))
   }
 
   // -- binops --
-  pub fn add<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
+  pub fn add<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Add(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
-  pub fn sub<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
+  pub fn sub<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Sub(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
-  pub fn mul<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
+  pub fn mul<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Mul(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
-  pub fn div<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
+  pub fn div<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Div(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
-  pub fn rem<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
+  pub fn rem<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Rem(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
-  pub fn and<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
+  pub fn and<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::And(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
-  pub fn xor<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
+  pub fn xor<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Xor(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
-  pub fn or<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
+  pub fn or<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Or(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
-  pub fn shl<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
+  pub fn shl<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Shl(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
-  pub fn shr<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
+  pub fn shr<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Shr(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
 
   // -- comparisons --
-  pub fn eq<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
+  pub fn eq<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Eq(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
-  pub fn neq<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
+  pub fn neq<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block, fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Neq(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
-  pub fn lt<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
+  pub fn lt<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Lt(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
-  pub fn lte<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
+  pub fn lte<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Lte(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
-  pub fn gt<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>)
-      -> Self {
+  pub fn gt<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Gt(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
-  pub fn gte<'t>(lhs: Self, rhs: Self, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
+  pub fn gte<'t>(
+    lhs: Self,
+    rhs: Self,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
     Value(ValueKind::Gte(
       function.flatten(lhs, mir, block, fn_types),
-      function.flatten(rhs, mir, block, fn_types)))
+      function.flatten(rhs, mir, block, fn_types),
+    ))
   }
 
   // -- misc --
-  pub fn call<'t>(callee: String, args: Vec<Self>, mir: &Mir<'t>,
-      function: &mut Function<'t>, block: &mut Block,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Self {
-    let args = args.into_iter().map(|v|
-      function.flatten(v, mir, block, fn_types)).collect();
+  pub fn call<'t>(
+    callee: String,
+    args: Vec<Self>,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    block: &mut Block,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Self {
+    let args = args
+      .into_iter()
+      .map(|v| function.flatten(v, mir, block, fn_types))
+      .collect();
     Value(ValueKind::Call {
       callee: callee,
       args: args,
@@ -464,18 +602,22 @@ impl Value {
 }
 
 impl Value {
-  fn ty<'t>(&self, mir: &Mir<'t>, function: &Function<'t>,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Type<'t> {
+  fn ty<'t>(
+    &self,
+    mir: &Mir<'t>,
+    function: &Function<'t>,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Type<'t> {
     match self.0 {
       ValueKind::Literal(ref lit) => lit.ty(mir, function),
       ValueKind::Parameter(par) => function.get_param_ty(par),
       ValueKind::Lvalue(ref lv) => lv.ty(function),
 
-      ValueKind::Pos(inner) | ValueKind::Neg(inner)
-      | ValueKind::Not(inner) => function.get_local_ty(inner),
+      ValueKind::Pos(inner) | ValueKind::Neg(inner) | ValueKind::Not(inner)
+      => function.get_local_ty(inner),
 
-      ValueKind::Ref(inner) =>
-        Type::ref_(function.get_local_ty(inner), mir.ctxt),
+      ValueKind::Ref(inner)
+      => Type::ref_(function.get_local_ty(inner), mir.ctxt),
 
       ValueKind::Add(lhs, rhs)
       | ValueKind::Sub(lhs, rhs)
@@ -491,15 +633,16 @@ impl Value {
         lhs_ty
       }
 
-      ValueKind::Shl(lhs, _)
-      | ValueKind::Shr(lhs, _)
-      => {
-        function.get_local_ty(lhs)
-      }
+      ValueKind::Shl(lhs, _) | ValueKind::Shr(lhs, _)
+      => function.get_local_ty(lhs)
 
-      ValueKind::Eq(_, _) | ValueKind::Neq(_, _) | ValueKind::Lt(_, _)
-      | ValueKind::Lte(_, _) | ValueKind::Gt(_, _) | ValueKind::Gte(_, _)
-        => Type::bool(mir.ctxt),
+      ValueKind::Eq(_, _)
+      | ValueKind::Neq(_, _)
+      | ValueKind::Lt(_, _)
+      | ValueKind::Lte(_, _)
+      | ValueKind::Gt(_, _)
+      | ValueKind::Gte(_, _)
+      => Type::bool(mir.ctxt),
 
       ValueKind::Call {
         ref callee,
@@ -511,20 +654,19 @@ impl Value {
     }
   }
 
-  fn to_llvm<'t>(self, mir: &Mir<'t>, function: &mut LlFunction<'t>,
-      funcs: &HashMap<String, (llvm::Value, Type<'t>)>)
-      -> llvm::Value {
+  fn to_llvm<'t>(
+    self,
+    mir: &Mir<'t>,
+    function: &mut LlFunction<'t>,
+    funcs: &HashMap<String, (llvm::Value, Type<'t>)>,
+  ) -> llvm::Value {
     match self.0 {
-      ValueKind::Literal(lit) => {
-        lit.to_llvm(function)
-      }
-      ValueKind::Parameter(par) => {
-        llvm::Value::get_param(function.raw, par.0)
-      }
+      ValueKind::Literal(lit) => lit.to_llvm(function),
+      ValueKind::Parameter(par) => llvm::Value::get_param(function.raw, par.0),
       ValueKind::Lvalue(lv) => {
         let ptr = lv.to_llvm(function);
         function.builder.build_load(ptr)
-      }
+      },
       ValueKind::Pos(inner) => {
         let ty = function.mir.get_local_ty(inner);
         let llinner = function.get_local_value(inner);
@@ -532,24 +674,21 @@ impl Value {
           TypeVariant::SInt(_) | TypeVariant::UInt(_) => llinner,
           _ => panic!("ICE: {} can't be used in unary +", ty),
         }
-      }
+      },
       ValueKind::Neg(inner) => {
-        // TODO(ubsan): check types
         let ty = function.mir.get_local_ty(inner);
         let llinner = function.get_local_value(inner);
         match *ty.0 {
-          TypeVariant::SInt(_) =>
-            function.builder.build_neg(llinner),
+          TypeVariant::SInt(_) => function.builder.build_neg(llinner),
           _ => panic!("ICE: {} can't be used in unary -", ty),
         }
-      }
+      },
       ValueKind::Not(inner) => {
         let ty = function.mir.get_local_ty(inner);
         let llinner = function.get_local_value(inner);
         match *ty.0 {
-          TypeVariant::SInt(_) | TypeVariant::UInt(_)
-          | TypeVariant::Bool =>
-            function.builder.build_not(llinner),
+          TypeVariant::SInt(_) | TypeVariant::UInt(_) | TypeVariant::Bool
+          => function.builder.build_not(llinner),
           _ => panic!("ICE: {} can't be used in unary !", ty),
         }
       }
@@ -559,8 +698,8 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) | TypeVariant::UInt(_) =>
-            function.builder.build_add(lhs, rhs),
+          TypeVariant::SInt(_) | TypeVariant::UInt(_)
+          => function.builder.build_add(lhs, rhs),
           _ => panic!("ICE: {} can't be used in binary +", ty),
         }
       }
@@ -569,8 +708,8 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) | TypeVariant::UInt(_) =>
-            function.builder.build_sub(lhs, rhs),
+          TypeVariant::SInt(_) | TypeVariant::UInt(_)
+          => function.builder.build_sub(lhs, rhs),
           _ => panic!("ICE: {} can't be used in binary -", ty),
         }
       }
@@ -579,8 +718,8 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) | TypeVariant::UInt(_) =>
-            function.builder.build_mul(lhs, rhs),
+          TypeVariant::SInt(_) | TypeVariant::UInt(_)
+          => function.builder.build_mul(lhs, rhs),
           _ => panic!("ICE: {} can't be used in binary *", ty),
         }
       }
@@ -589,10 +728,8 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) =>
-            function.builder.build_sdiv(lhs, rhs),
-          TypeVariant::UInt(_) =>
-            function.builder.build_udiv(lhs, rhs),
+          TypeVariant::SInt(_) => function.builder.build_sdiv(lhs, rhs),
+          TypeVariant::UInt(_) => function.builder.build_udiv(lhs, rhs),
           _ => panic!("ICE: {} can't be used in binary /", ty),
         }
       }
@@ -601,10 +738,8 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) =>
-            function.builder.build_srem(lhs, rhs),
-          TypeVariant::UInt(_) =>
-            function.builder.build_urem(lhs, rhs),
+          TypeVariant::SInt(_) => function.builder.build_srem(lhs, rhs),
+          TypeVariant::UInt(_) => function.builder.build_urem(lhs, rhs),
           _ => panic!("ICE: {} can't be used in binary %", ty),
         }
       }
@@ -613,9 +748,8 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) | TypeVariant::UInt(_)
-          | TypeVariant::Bool =>
-            function.builder.build_and(lhs, rhs),
+          TypeVariant::SInt(_) | TypeVariant::UInt(_) | TypeVariant::Bool
+          => function.builder.build_and(lhs, rhs),
           _ => panic!("ICE: {} can't be used in binary %", ty),
         }
       }
@@ -624,9 +758,8 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) | TypeVariant::UInt(_)
-          | TypeVariant::Bool =>
-            function.builder.build_xor(lhs, rhs),
+          TypeVariant::SInt(_) | TypeVariant::UInt(_) | TypeVariant::Bool
+          => function.builder.build_xor(lhs, rhs),
           _ => panic!("ICE: {} can't be used in binary %", ty),
         }
       }
@@ -635,9 +768,8 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) | TypeVariant::UInt(_)
-          | TypeVariant::Bool =>
-            function.builder.build_or(lhs, rhs),
+          TypeVariant::SInt(_) | TypeVariant::UInt(_) | TypeVariant::Bool
+          => function.builder.build_or(lhs, rhs),
           _ => panic!("ICE: {} can't be used in binary %", ty),
         }
       }
@@ -646,8 +778,8 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) | TypeVariant::UInt(_) =>
-            function.builder.build_shl(lhs, rhs),
+          TypeVariant::SInt(_) | TypeVariant::UInt(_)
+          => function.builder.build_shl(lhs, rhs),
           _ => panic!("ICE: {} can't be used in binary %", ty),
         }
       }
@@ -656,10 +788,8 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) =>
-            function.builder.build_ashr(lhs, rhs),
-          TypeVariant::UInt(_) =>
-            function.builder.build_lshr(lhs, rhs),
+          TypeVariant::SInt(_) => function.builder.build_ashr(lhs, rhs),
+          TypeVariant::UInt(_) => function.builder.build_lshr(lhs, rhs),
           _ => panic!("ICE: {} can't be used in binary %", ty),
         }
       }
@@ -668,9 +798,8 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) | TypeVariant::UInt(_)
-          | TypeVariant::Bool =>
-            function.builder.build_icmp(llvm::IntEQ, lhs, rhs),
+          TypeVariant::SInt(_) | TypeVariant::UInt(_) | TypeVariant::Bool
+          => function.builder.build_icmp(llvm::IntEQ, lhs, rhs),
           _ =>  panic!("ICE: {} can't be used in ==", ty),
         }
       }
@@ -679,9 +808,8 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) | TypeVariant::UInt(_)
-          | TypeVariant::Bool =>
-            function.builder.build_icmp(llvm::IntNE, lhs, rhs),
+          TypeVariant::SInt(_) | TypeVariant::UInt(_) | TypeVariant::Bool
+          => function.builder.build_icmp(llvm::IntNE, lhs, rhs),
           _ =>  panic!("ICE: {} can't be used in !=", ty),
         }
       }
@@ -690,10 +818,10 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) =>
-            function.builder.build_icmp(llvm::IntSLT, lhs, rhs),
-          TypeVariant::UInt(_) | TypeVariant::Bool =>
-            function.builder.build_icmp(llvm::IntULT, lhs, rhs),
+          TypeVariant::SInt(_)
+          => function.builder.build_icmp(llvm::IntSLT, lhs, rhs),
+          TypeVariant::UInt(_) | TypeVariant::Bool
+          => function.builder.build_icmp(llvm::IntULT, lhs, rhs),
           _ =>  panic!("ICE: {} can't be used in <", ty),
         }
       }
@@ -702,10 +830,10 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) =>
-            function.builder.build_icmp(llvm::IntSLE, lhs, rhs),
-          TypeVariant::UInt(_) | TypeVariant::Bool =>
-            function.builder.build_icmp(llvm::IntULE, lhs, rhs),
+          TypeVariant::SInt(_)
+          => function.builder.build_icmp(llvm::IntSLE, lhs, rhs),
+          TypeVariant::UInt(_) | TypeVariant::Bool
+          => function.builder.build_icmp(llvm::IntULE, lhs, rhs),
           _ =>  panic!("ICE: {} can't be used in <=", ty),
         }
       }
@@ -714,12 +842,10 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) =>
-            function.builder.build_icmp(llvm::IntSGT,
-              lhs, rhs),
-          TypeVariant::UInt(_) | TypeVariant::Bool =>
-            function.builder.build_icmp(llvm::IntUGT,
-              lhs, rhs),
+          TypeVariant::SInt(_)
+          => function.builder.build_icmp(llvm::IntSGT, lhs, rhs),
+          TypeVariant::UInt(_) | TypeVariant::Bool
+          => function.builder.build_icmp(llvm::IntUGT, lhs, rhs),
           _ =>  panic!("ICE: {} can't be used in >", ty),
         }
       }
@@ -728,12 +854,10 @@ impl Value {
         let lhs = function.get_local_value(lhs);
         let rhs = function.get_local_value(rhs);
         match *ty.0 {
-          TypeVariant::SInt(_) =>
-            function.builder.build_icmp(llvm::IntSGE,
-              lhs, rhs),
-          TypeVariant::UInt(_) | TypeVariant::Bool =>
-            function.builder.build_icmp(llvm::IntUGE,
-              lhs, rhs),
+          TypeVariant::SInt(_)
+          => function.builder.build_icmp(llvm::IntSGE, lhs, rhs),
+          TypeVariant::UInt(_) | TypeVariant::Bool
+          => function.builder.build_icmp(llvm::IntUGE, lhs, rhs),
           _ =>  panic!("ICE: {} can't be used in >=", ty),
         }
       }
@@ -741,8 +865,11 @@ impl Value {
         callee,
         args,
       } => {
-        let args = args.into_iter().map(|a|
-          function.get_local_value(a)).collect::<Vec<_>>();
+        let args =
+          args
+            .into_iter()
+            .map(|a| function.get_local_value(a))
+            .collect::<Vec<_>>();
         let (callee, output) = *funcs.get(&callee).unwrap();
         let llret = function.builder.build_call(callee, &args);
 
@@ -772,8 +899,7 @@ impl Lvalue {
         if let TypeVariant::Reference(inner) = *outer_ty.0 {
           inner
         } else {
-          panic!("ICE: Attempt to take type of a deref of {:?}",
-            outer_ty);
+          panic!("ICE: Attempt to take type of a deref of {:?}", outer_ty);
         }
       }
       Lvalue::Return => {
@@ -801,8 +927,12 @@ impl Lvalue {
 struct Statement(Lvalue, Value);
 
 impl Statement {
-  fn to_llvm<'t>(self, mir: &Mir<'t>, function: &mut LlFunction<'t>,
-      funcs: &HashMap<String, (llvm::Value, Type<'t>)>) {
+  fn to_llvm<'t>(
+    self,
+    mir: &Mir<'t>,
+    function: &mut LlFunction<'t>,
+    funcs: &HashMap<String, (llvm::Value, Type<'t>)>,
+  ) {
     let dst = (self.0).to_llvm(function);
     let src = (self.1).to_llvm(mir, function, funcs);
     function.builder.build_store(dst, src);
@@ -833,13 +963,14 @@ impl Terminator {
         mut else_blk,
       } => {
         let cond = function.get_local_value(cond);
-        function.builder.build_cond_br(cond,
+        function.builder.build_cond_br(
+          cond,
           function.get_block(&mut then_blk),
-          function.get_block(&mut else_blk));
+          function.get_block(&mut else_blk),
+        );
       }
       Terminator::Return => {
-        if llvm::size_of_type(&mir.target_data,
-            function.mir.ty.output()) == 0 {
+        if llvm::size_of_type(&mir.target_data, function.mir.ty.output()) == 0 {
           function.builder.build_void_ret();
         } else {
           let value = function.builder.build_load(function.ret_ptr);
@@ -854,39 +985,55 @@ impl Terminator {
 pub struct Block(usize);
 
 impl Block {
-  pub fn set(&mut self, loc: Local, val: Value,
-      function: &mut Function) {
+  pub fn set(&mut self, loc: Local, val: Value, function: &mut Function) {
     self.add_stmt(Lvalue::Local(loc), val, function)
   }
 
-  pub fn store<'t>(&mut self, ptr: Value, val: Value,
-      mir: &Mir<'t>, function: &mut Function<'t>,
-      fn_types: &HashMap<String, ty::Function<'t>>) {
+  pub fn store<'t>(
+    &mut self,
+    ptr: Value,
+    val: Value,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) {
     let local = function.flatten(ptr, mir, self, fn_types);
     self.add_stmt(Lvalue::Deref(local), val, function)
   }
 
-  pub fn set_tmp<'t>(&mut self, val: Value,
-      mir: &Mir<'t>, function: &mut Function<'t>,
-      fn_types: &HashMap<String, ty::Function<'t>>) -> Value {
+  pub fn set_tmp<'t>(
+    &mut self,
+    val: Value,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> Value {
     let ty = val.ty(mir, function, fn_types);
     let tmp = function.new_local(ty);
     self.add_stmt(Lvalue::Local(tmp), val, function);
     Value::local(tmp)
   }
 
-  fn add_stmt(&mut self, lvalue: Lvalue, value: Value,
-      function: &mut Function) {
+  fn add_stmt(
+    &mut self,
+    lvalue: Lvalue,
+    value: Value,
+    function: &mut Function,
+  ) {
     let blk = function.get_block(self);
     blk.statements.push(Statement(lvalue, value))
   }
 }
 // terminators
 impl Block {
-  pub fn if_else<'t>(mut self, ty: Type<'t>, cond: Value,
-      mir: &Mir<'t>, function: &mut Function<'t>,
-      fn_types: &HashMap<String, ty::Function<'t>>)
-      -> (Block, Block, Block, Value) {
+  pub fn if_else<'t>(
+    mut self,
+    ty: Type<'t>,
+    cond: Value,
+    mir: &Mir<'t>,
+    function: &mut Function<'t>,
+    fn_types: &HashMap<String, ty::Function<'t>>,
+  ) -> (Block, Block, Block, Value) {
     let cond = function.flatten(cond, mir, &mut self, fn_types);
     let tmp = function.new_local(ty);
 
@@ -931,8 +1078,7 @@ impl Block {
     blk.statements.push(Statement(blk.expr, value));
   }
 
-  fn terminate(&mut self, function: &mut Function,
-      terminator: Terminator) {
+  fn terminate(&mut self, function: &mut Function, terminator: Terminator) {
     let blk = function.get_block(self);
     blk.terminator = terminator;
   }
@@ -1002,8 +1148,7 @@ impl<'t> Mir<'t> {
         (llfunc, function.ty.output()));
     }
 
-    let functions =
-      std::mem::replace(&mut self.functions, HashMap::new());
+    let functions = std::mem::replace(&mut self.functions, HashMap::new());
     for (name, function) in functions {
       let llfunc = llvm_functions.get(&name).unwrap().0;
       function.build(&self, llfunc, &llvm_functions);

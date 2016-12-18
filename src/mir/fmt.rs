@@ -1,5 +1,15 @@
-use super::{Mir, Function, Terminator, Statement, Lvalue, Literal,
-  Value, ValueKind, Local, Parameter};
+use super::{
+  Mir,
+  Function,
+  Terminator,
+  Statement,
+  Lvalue,
+  Literal,
+  Value,
+  ValueKind,
+  Local,
+  Parameter,
+};
 use std::fmt::{Debug, Display, Formatter, Error};
 
 impl<'t> Display for Function<'t> {
@@ -30,8 +40,9 @@ impl Display for Terminator {
         ref cond,
         ref then_blk,
         ref else_blk,
-      } => write!(f, "if({}) -> [true: bb{}, false: bb{}]", cond,
-        then_blk.0, else_blk.0),
+      } => write!(
+        f, "if({}) -> [true: bb{}, false: bb{}]", cond, then_blk.0, else_blk.0,
+      ),
     }
   }
 }
@@ -92,39 +103,23 @@ impl Display for Value {
       ValueKind::Neg(ref inner) => write!(f, "Neg({})", inner),
       ValueKind::Not(ref inner) => write!(f, "Not({})", inner),
       ValueKind::Ref(ref inner) => write!(f, "&{}", inner),
-      ValueKind::Add(ref lhs, ref rhs)
-        => write!(f, "Add({}, {})", lhs, rhs),
-      ValueKind::Sub(ref lhs, ref rhs)
-        => write!(f, "Sub({}, {})", lhs, rhs),
-      ValueKind::Mul(ref lhs, ref rhs)
-        => write!(f, "Mul({}, {})", lhs, rhs),
-      ValueKind::Div(ref lhs, ref rhs)
-        => write!(f, "Div({}, {})", lhs, rhs),
-      ValueKind::Rem(ref lhs, ref rhs)
-        => write!(f, "Rem({}, {})", lhs, rhs),
-      ValueKind::And(ref lhs, ref rhs)
-        => write!(f, "And({}, {})", lhs, rhs),
-      ValueKind::Xor(ref lhs, ref rhs)
-        => write!(f, "And({}, {})", lhs, rhs),
-      ValueKind::Or(ref lhs, ref rhs)
-        => write!(f, "And({}, {})", lhs, rhs),
-      ValueKind::Shl(ref lhs, ref rhs)
-        => write!(f, "Shl({}, {})", lhs, rhs),
-      ValueKind::Shr(ref lhs, ref rhs)
-        => write!(f, "Shr({}, {})", lhs, rhs),
+      ValueKind::Add(ref lhs, ref rhs) => write!(f, "Add({}, {})", lhs, rhs),
+      ValueKind::Sub(ref lhs, ref rhs) => write!(f, "Sub({}, {})", lhs, rhs),
+      ValueKind::Mul(ref lhs, ref rhs) => write!(f, "Mul({}, {})", lhs, rhs),
+      ValueKind::Div(ref lhs, ref rhs) => write!(f, "Div({}, {})", lhs, rhs),
+      ValueKind::Rem(ref lhs, ref rhs) => write!(f, "Rem({}, {})", lhs, rhs),
+      ValueKind::And(ref lhs, ref rhs) => write!(f, "And({}, {})", lhs, rhs),
+      ValueKind::Xor(ref lhs, ref rhs) => write!(f, "And({}, {})", lhs, rhs),
+      ValueKind::Or(ref lhs, ref rhs) => write!(f, "And({}, {})", lhs, rhs),
+      ValueKind::Shl(ref lhs, ref rhs) => write!(f, "Shl({}, {})", lhs, rhs),
+      ValueKind::Shr(ref lhs, ref rhs) => write!(f, "Shr({}, {})", lhs, rhs),
 
-      ValueKind::Eq(ref lhs, ref rhs)
-        => write!(f, "Eq({}, {})", lhs, rhs),
-      ValueKind::Neq(ref lhs, ref rhs)
-        => write!(f, "Neq({}, {})", lhs, rhs),
-      ValueKind::Lt(ref lhs, ref rhs)
-        => write!(f, "Lt({}, {})", lhs, rhs),
-      ValueKind::Lte(ref lhs, ref rhs)
-        => write!(f, "Lte({}, {})", lhs, rhs),
-      ValueKind::Gt(ref lhs, ref rhs)
-        => write!(f, "Gt({}, {})", lhs, rhs),
-      ValueKind::Gte(ref lhs, ref rhs)
-        => write!(f, "Gte({}, {})", lhs, rhs),
+      ValueKind::Eq(ref lhs, ref rhs) => write!(f, "Eq({}, {})", lhs, rhs),
+      ValueKind::Neq(ref lhs, ref rhs) => write!(f, "Neq({}, {})", lhs, rhs),
+      ValueKind::Lt(ref lhs, ref rhs) => write!(f, "Lt({}, {})", lhs, rhs),
+      ValueKind::Lte(ref lhs, ref rhs) => write!(f, "Lte({}, {})", lhs, rhs),
+      ValueKind::Gt(ref lhs, ref rhs) => write!(f, "Gt({}, {})", lhs, rhs),
+      ValueKind::Gte(ref lhs, ref rhs) => write!(f, "Gte({}, {})", lhs, rhs),
 
       ValueKind::Call {
         ref callee,
