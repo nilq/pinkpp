@@ -865,11 +865,10 @@ impl Value {
         callee,
         args,
       } => {
-        let args =
-          args
-            .into_iter()
-            .map(|a| function.get_local_value(a))
-            .collect::<Vec<_>>();
+        let args = args
+          .into_iter()
+          .map(|a| function.get_local_value(a))
+          .collect::<Vec<_>>();
         let (callee, output) = *funcs.get(&callee).unwrap();
         let llret = function.builder.build_call(callee, &args);
 
