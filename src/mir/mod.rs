@@ -631,7 +631,7 @@ impl Value {
         let lhs_ty = function.get_local_ty(lhs);
         assert_eq!(lhs_ty, function.get_local_ty(rhs));
         lhs_ty
-      }
+      },
 
       ValueKind::Shl(lhs, _) | ValueKind::Shr(lhs, _)
       => function.get_local_ty(lhs)
